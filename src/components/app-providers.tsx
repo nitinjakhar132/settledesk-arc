@@ -43,8 +43,11 @@ export function AppProviders({
           },
           showWalletUIs: true,
         },
-        supportedChains: [arcTestnet, arc, baseSepolia, base],
-        defaultChain: arcTestnet,
+        // Production workspaces settle on Arc mainnet. Testnet remains
+        // available as an explicit store setting, but must not be the wallet
+        // default for newly created email/SMS users.
+        supportedChains: [arc, base, arcTestnet, baseSepolia],
+        defaultChain: arc,
       }}
     >
       {children}
