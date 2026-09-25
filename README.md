@@ -5,7 +5,7 @@ Money in. Mind at ease.
 A mobile-first counter and merchant app built around Arc, Circle CCTP, and Relay. Arc Counter creates a temporary sale QR that buyers can open in any browser, choose a private tip, and pay from an EVM wallet without installing the app. Circle-issued USDC is routed to Arc through CCTP; other Relay-supported tokens are swapped and bridged into USDC on Arc. Rewind sends USDC refunds back to the original paying wallet, while ArcTrace connects payment, verification, settlement, and return to one order.
 
 **Live app:** [settledesk-arc.vercel.app](https://settledesk-arc.vercel.app)  
-**Instant demo:** [settledesk-arc.vercel.app/demo](https://settledesk-arc.vercel.app/demo)
+**Production app:** [settledesk-arc.vercel.app](https://settledesk-arc.vercel.app) — connect with a wallet, email, or mobile number. The hosted app defaults new workspaces and payment links to Arc mainnet.
 
 ## What SettleDesk uses Arc for
 
@@ -64,7 +64,7 @@ Fee discovery accounts for deployment differences: Base’s older messenger does
 
 Privy is the only login surface. The app accepts a supported external EVM wallet—including detected Rabby and MetaMask wallets—or creates an embedded wallet after email/SMS login. SettleDesk never receives a private key or delegated signing authority.
 
-New wallet workspaces default to **testnet**. Set the store name and network under **Your store**. Switching to mainnet affects new links; existing links retain their original network. Dashboard totals never combine testnet and mainnet.
+The hosted deployment defaults new wallet workspaces to **mainnet**. Local development defaults to **testnet** unless `SETTLEDESK_DEFAULT_NETWORK=mainnet` is configured. Set the store name and network under **Your store**. Switching networks affects new links; existing links retain their original network. Dashboard totals never combine testnet and mainnet.
 
 - Payment: customer approves USDC on Base, then burns through Circle’s TokenMessengerV2 with the order reference in hook data. The server verifies the emitted message before linking it.
 - Funding: the merchant chooses an exact net amount of Base USDC. The quote grosses up Circle’s fee, approval is exact, the burn is bound to the signed-in wallet and Arc recipient, and its source hash is saved locally so the transfer can resume after closing the app.

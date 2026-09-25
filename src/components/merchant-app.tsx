@@ -506,9 +506,6 @@ function MerchantExperience({
                 </>
               )}
             </button>
-            <a className="button secondary" href="/demo">
-              Explore the demo
-            </a>
           </div>
           <div className="signin-methods">
             <span>Wallet</span>
