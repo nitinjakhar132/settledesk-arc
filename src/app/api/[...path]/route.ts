@@ -22,6 +22,10 @@ import {
   referenceHook,
 } from "@/lib/cctp";
 import { createRelayQuote, verifyRelayPayment } from "@/lib/relay-server";
+import {
+  coinbaseCashoutConfigured,
+  createCoinbaseCashoutQuote,
+} from "@/lib/offramp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -92,6 +96,38 @@ function fundingPayment(
     createdAt: Date.now(),
     refunds: [],
   };
+}
+function cashoutPayment(
+  owner: string,
+  mode: "testnet" | "mainnet",
+  amount: string,
+  cashoutId: string,
+) {
+  const profile = store.profile(owner);
+  if (!profile.address) throw new Error("Connect your wallet first.");
+  const value = decimal(units(amount));
+  const payment: Payment = {
+    id: `cashout-${cashoutId}`,
+    owner,
+    mode,
+    amount: value,
+    customer: profile.name,
+    description: "Cash out Arc USDC",
+    merchantAddress: profile.address,
+    merchantName: profile.name,
+    payerAddress: profile.address,
+    reference: `CASH-${cashoutId.slice(0, 8).toUpperCase()}`,
+    createdAt: Date.now(),
+    refunds: [],
+  };
+  const refund: Refund = {
+    id: "bank",
+    amount: value,
+    reason: "Move Arc USDC to Base for bank cash-out",
+    status: "processing",
+    startedAt: Date.now(),
+  };
+  return { payment, refund };
 }
 async function dispatch(request: Request, parts: string[]) {
   const method = request.method;
@@ -245,6 +281,84 @@ async function dispatch(request: Request, parts: string[]) {
     if (path === "funding/mint") {
       if (!input.mintHash) throw new Error("An Arc transaction is required.");
       await verifyMint(payment, transfer, input.mintHash as Hex);
+      return { ok: true };
+    }
+  }
+  if (path === "cashout/config" && method === "GET") {
+    if (!owner) throw new Error("Please sign in first.");
+    return {
+      enabled: coinbaseCashoutConfigured(),
+      provider: "Coinbase",
+      route: "Arc → Base → US bank",
+    };
+  }
+  if (path === "cashout/offramp" && method === "POST") {
+    if (!owner) throw new Error("Please sign in first.");
+    const input = z
+      .object({
+        amount: z.string(),
+        sourceAddress: address,
+        subdivision: z.string().regex(/^[A-Z]{2}$/),
+      })
+      .parse(body);
+    const profile = store.profile(owner);
+    if (profile.mode !== "mainnet")
+      throw new Error("Bank cash-out is available from Arc mainnet only.");
+    if (
+      !profile.address ||
+      profile.address.toLowerCase() !== input.sourceAddress.toLowerCase()
+    )
+      throw new Error("Use your signed-in merchant wallet to cash out.");
+    if (units(input.amount) < 1_000_000n)
+      throw new Error("Cash out at least 1 USDC.");
+    limit(`cashout-offramp:${owner}`, 8);
+    return createCoinbaseCashoutQuote({
+      ...input,
+      redirectOrigin: requestOrigin(request),
+    });
+  }
+  if (path.startsWith("cashout/") && method === "POST") {
+    if (!owner) throw new Error("Please sign in first.");
+    const input = z
+      .object({
+        mode: z.enum(["testnet", "mainnet"]),
+        amount: z.string(),
+        cashoutId: z.string().uuid(),
+        burnHash: txHash.optional(),
+        mintHash: txHash.optional(),
+      })
+      .parse(body);
+    const profile = store.profile(owner);
+    if (profile.mode !== input.mode)
+      throw new Error("The cash-out network does not match your store.");
+    const { payment, refund } = cashoutPayment(
+      owner,
+      input.mode,
+      input.amount,
+      input.cashoutId,
+    );
+    if (path === "cashout/quote") {
+      limit(`cashout-quote:${owner}`, 12);
+      return {
+        ...(await quote(payment, refund)),
+        hook: referenceHook(payment.id, refund.id),
+      };
+    }
+    if (!input.burnHash) throw new Error("An Arc transaction is required.");
+    await verifyBurn(payment, input.burnHash as Hex, refund);
+    const transfer = await refreshTransfer(
+      payment,
+      {
+        status: "processing",
+        burnHash: input.burnHash,
+        startedAt: Date.now(),
+      },
+      refund,
+    );
+    if (path === "cashout/status") return { transfer };
+    if (path === "cashout/mint") {
+      if (!input.mintHash) throw new Error("A Base transaction is required.");
+      await verifyMint(payment, transfer, input.mintHash as Hex, refund);
       return { ok: true };
     }
   }

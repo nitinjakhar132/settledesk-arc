@@ -1,14 +1,14 @@
 import { test, expect } from "@playwright/test";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-test("unconfigured Privy state is clear, responsive, and error-free", async ({
-  page,
-}) => {
+test("welcome state is clear, responsive, and error-free", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Bring your business wallet to life." }),
+    page.getByRole("heading", {
+      name: /Bring your business wallet to life\.|Money in\. Mind at ease\./,
+    }),
   ).toBeVisible();
   await expect(page.getByText("Wallet", { exact: true })).toBeVisible();
   await expect(page.getByText("Email", { exact: true })).toBeVisible();

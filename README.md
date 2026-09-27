@@ -38,6 +38,7 @@ npm start
 4. Open **Arc Counter**, tap a quick amount, and show the 10-minute QR. The merchant can hide the amount while the buyer privately chooses a tip.
 5. The buyer pays with Circle USDC through CCTP, another Relay-supported EVM token through Relay, or—when configured—Stripe card/mobile wallet/Cash App Pay or PayPal/Venmo.
 6. After USDC settlement, open the payment and use **Refund** to send a full or partial return to the original paying wallet.
+7. Tap **Cash out**, choose an amount and U.S. state, move Arc USDC to the same wallet on Base through CCTP, then use Coinbase Offramp to review the conversion and ACH bank payout.
 
 ## Included
 
@@ -52,6 +53,7 @@ npm start
 - A short-lived wallet challenge behind Privy, signature verification, and HttpOnly application sessions.
 - Live Arc USDC/EURC and Base USDC/ETH balance views; the interface intentionally hides unsupported token clutter.
 - Recoverable Base → Arc account funding plus Base ↔ Arc payment/refund settlement through CCTP V2.
+- A non-custodial Arc → Base → bank cash-out: CCTP delivers USDC to the merchant’s own Base wallet before Coinbase handles identity checks, the sale, and the optional U.S. ACH payout.
 - Exact six-decimal monetary arithmetic; refund reservations and idempotency; cross-merchant authorization.
 - Source receipt verification and invoice binding through CCTP hook metadata.
 - Circle attestation polling, destination receive, expired-message re-attestation, and finalized destination-state checks.
@@ -71,6 +73,7 @@ The hosted deployment defaults new wallet workspaces to **mainnet**. Local devel
 - Refund: merchant reserves an amount, reviews the fee, and approves the return burn on Arc. The destination is the original source transaction’s wallet. This version accepts direct deposits through SettleDesk, not arbitrary routers.
 - Settlement: the app obtains Circle’s attestation. A wallet submits the destination `receiveMessage`. The server only marks the payment settled after the attested nonce is used in the destination contract’s **finalized** state.
 - Recovery: a broadcast source hash is saved locally before waiting for confirmation. Retrying resumes that transfer rather than sending another. A reserved refund stays available for review and approval.
+- Cash-out: the merchant chooses a net amount, CCTP moves it from Arc to the same address on Base, and only then does the app open a signed Coinbase Offramp quote. SettleDesk never receives the USDC or bank details. If Coinbase onboarding is not completed, the USDC remains recoverable in the merchant’s Base wallet.
 
 The app uses Standard Transfers. They may take several minutes, particularly with source-chain finality requirements. No automatic forwarding, sponsored destination gas, or private-key relayer is configured. The destination receive step therefore requires a wallet transaction. Circle hooks carry a signed order reference; they do not automatically execute application logic.
 
@@ -101,7 +104,7 @@ SQLite stores profiles, payments, refund reservations, consumed challenges, and 
 
 Deploy this version as **one Node.js service with a persistent disk**, using the included Dockerfile or an equivalent host. It is not suitable for stateless serverless hosting without replacing the storage adapter. Back up the database and its WAL together, or use SQLite’s backup tooling.
 
-Environment variables are documented in `.env.example`. Set the public Privy app ID, set `APP_ORIGIN` to the exact HTTPS public origin behind a proxy, and set `SETTLEDESK_DB` to the persistent volume path. Dedicated RPC URLs can replace public defaults. No Circle API secret or server wallet private key is required for CCTP. Stripe and PayPal credentials are optional and only enable their corresponding buyer buttons.
+Environment variables are documented in `.env.example`. Set the public Privy app ID, set `APP_ORIGIN` to the exact HTTPS public origin behind a proxy, and set `SETTLEDESK_DB` to the persistent volume path. Dedicated RPC URLs can replace public defaults. No Circle API secret or server wallet private key is required for CCTP. `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` enable Coinbase bank cash-out; Stripe and PayPal credentials are optional and only enable their corresponding buyer buttons.
 
 Stripe and PayPal in this prototype are configured as the platform merchant accounts. A production multi-merchant release needs Stripe Connect and PayPal Commerce Platform onboarding so every merchant receives their own fiat proceeds. A processor-confirmed fiat payment is deliberately shown as **settling**: card, Cash App, PayPal, and Venmo proceeds are not magically onchain USDC and are not counted in the merchant’s Arc balance. Fiat disputes and refunds remain in the processor; Rewind is currently for verified USDC payments only.
 
@@ -117,6 +120,7 @@ The installable mobile experience requires HTTPS, except on localhost. Local com
 - A failed or cancelled wallet approval leaves the same refund reservation available to resume. Reservations do not expire automatically, to avoid releasing funds while a submitted transfer is uncertain.
 - Multiple simultaneous checkout wallets can still independently broadcast onchain payments. A production payment contract would be needed to enforce one payment per invoice onchain.
 - Fiat rails require approved processor accounts, eligible devices/regions, HTTPS domains, and production webhooks. Apple Pay and Google Pay appear through Stripe only when the buyer and device are eligible. Venmo availability is determined by PayPal.
+- Coinbase cash-out is limited to eligible users and supported regions. This release selects U.S. ACH and asks for the merchant’s state because Coinbase requires it for asset eligibility; Coinbase owns identity verification, final fees, timing, and payout status.
 - Zelle is intentionally not presented as an integrated checkout method because it does not provide a general-purpose merchant checkout API. Bank transfer is omitted from the fast counter flow.
 - Public links are unguessable capability URLs. Anyone with the link can see its receipt; do not put sensitive personal information in the customer or description fields.
 - Rate limiting is in-process and assumes a trusted reverse proxy. Scale-out hosting needs a shared limiter and durable background processing.
@@ -134,6 +138,8 @@ The installable mobile experience requires HTTPS, except on localhost. Local com
 `src/lib/client.ts` — wallet transactions and browser helpers
 
 `src/lib/assets.ts` — curated Arc/Base asset reads
+
+`src/lib/offramp.ts` — signed Coinbase Offramp quote creation
 
 `src/lib/model.ts` — exact amounts and refund rules
 

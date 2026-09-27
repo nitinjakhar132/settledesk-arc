@@ -242,6 +242,123 @@ export async function continueArcFunding(
   await api("funding/mint", { mode, amount: value, burnHash, mintHash });
   return { ...result.transfer, status: "settled" as const, mintHash };
 }
+export async function startArcCashout(
+  mode: "testnet" | "mainnet",
+  value: string,
+  cashoutId: string,
+  connectedWallet: ConnectedWallet,
+  onStep: (step: string) => void,
+) {
+  const quote = await api<Quote & { hook: Hex }>("cashout/quote", {
+    mode,
+    amount: value,
+    cashoutId,
+  });
+  const { wallet, account, config, client } = await chainContext(
+    mode,
+    "arc",
+    connectedWallet,
+  );
+  const amount = BigInt(quote.amount);
+  const balance = await client.readContract({
+    address: config.usdc,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: [account],
+  });
+  if (balance < amount)
+    throw new Error(`You need ${quote.total} USDC on Arc, including the fee.`);
+  const allowance = await client.readContract({
+    address: config.usdc,
+    abi: erc20Abi,
+    functionName: "allowance",
+    args: [account, config.messenger],
+  });
+  if (allowance < amount) {
+    onStep("Approve this exact USDC amount…");
+    const approval = await wallet.writeContract({
+      address: config.usdc,
+      abi: erc20Abi,
+      functionName: "approve",
+      args: [config.messenger, amount],
+    });
+    const receipt = await client.waitForTransactionReceipt({ hash: approval });
+    if (receipt.status !== "success")
+      throw new Error("USDC approval failed. Nothing was moved.");
+  }
+  onStep("Confirm the move from Arc…");
+  const { request } = await client.simulateContract({
+    account,
+    address: config.messenger,
+    abi: messengerAbi,
+    functionName: "depositForBurnWithHook",
+    args: [
+      amount,
+      6,
+      pad(account),
+      config.usdc,
+      pad("0x"),
+      BigInt(quote.maxFee),
+      2000,
+      quote.hook,
+    ],
+  });
+  const burnHash = await wallet.writeContract(request);
+  onStep("Saving your cash-out transfer…");
+  const receipt = await client.waitForTransactionReceipt({ hash: burnHash });
+  if (receipt.status !== "success")
+    throw new Error("The Arc transaction reverted. Nothing was moved.");
+  const result = await api<{ transfer: FundingTransfer }>("cashout/status", {
+    mode,
+    amount: value,
+    cashoutId,
+    burnHash,
+  });
+  return { ...result, burnHash, quote };
+}
+export async function continueArcCashout(
+  mode: "testnet" | "mainnet",
+  value: string,
+  cashoutId: string,
+  burnHash: Hex,
+  connectedWallet: ConnectedWallet,
+  onStep: (step: string) => void,
+) {
+  const result = await api<{ transfer: FundingTransfer }>("cashout/status", {
+    mode,
+    amount: value,
+    cashoutId,
+    burnHash,
+  });
+  if (result.transfer.status !== "ready") return result.transfer;
+  if (!result.transfer.message || !result.transfer.attestation)
+    throw new Error("Circle verification is not complete yet.");
+  onStep("Confirm receipt on Base…");
+  const { wallet, account, config, client } = await chainContext(
+    mode,
+    "base",
+    connectedWallet,
+  );
+  const { request } = await client.simulateContract({
+    account,
+    address: config.transmitter,
+    abi: transmitterAbi,
+    functionName: "receiveMessage",
+    args: [result.transfer.message, result.transfer.attestation],
+  });
+  const mintHash = await wallet.writeContract(request);
+  const receipt = await client.waitForTransactionReceipt({ hash: mintHash });
+  if (receipt.status !== "success")
+    throw new Error("Base did not receive the transfer. You can safely retry.");
+  await api("cashout/mint", {
+    mode,
+    amount: value,
+    cashoutId,
+    burnHash,
+    mintHash,
+  });
+  return { ...result.transfer, status: "settled" as const, mintHash };
+}
 export async function sendPayment(
   payment: Payment,
   quote: Quote,

@@ -16,6 +16,7 @@
     "format": "prettier --write src tests scripts *.ts *.json public/sw.js"
   },
   "dependencies": {
+    "@coinbase/cdp-sdk": "^1.57.0",
     "@fontsource-variable/dm-sans": "^5.3.0",
     "@privy-io/react-auth": "^3.43.0",
     "@relayprotocol/relay-sdk": "^8.0.1",

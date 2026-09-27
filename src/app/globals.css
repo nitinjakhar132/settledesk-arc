@@ -851,6 +851,15 @@ code {
   padding: 10px 14px;
   font-size: 11px;
 }
+.arc-account-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cashout-button {
+  border-color: #435137;
+  color: #d8e9c6;
+}
 .home-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 278px;
@@ -1072,6 +1081,36 @@ code {
 .funding-route strong {
   font-size: 12px;
   font-weight: 500;
+}
+.cashout-route {
+  grid-template-columns: 1fr auto 0.8fr auto 0.8fr;
+  gap: 8px;
+}
+.cashout-route > div {
+  min-width: 0;
+}
+.cashout-route .chain-icon {
+  width: 29px;
+  height: 29px;
+}
+.chain-icon.bank {
+  background: #2f3a29;
+  color: var(--green);
+}
+.cashout-state {
+  margin: 0;
+}
+.cashout-state select {
+  width: 100%;
+}
+.processor-note {
+  padding: 12px 14px;
+  border: 1px solid #494331;
+  border-radius: 13px;
+  background: #28251c;
+  color: #c8bea2;
+  font-size: 10px;
+  line-height: 1.6;
 }
 .funding-amount {
   color: #aeb5a5;
@@ -3627,6 +3666,9 @@ code {
     width: 42px;
     padding: 0;
     font-size: 0;
+  }
+  .arc-account-actions {
+    gap: 7px;
   }
   .arc-fund-button svg {
     width: 18px;

@@ -24,6 +24,7 @@ import {
   Eye,
   EyeOff,
   Home,
+  Landmark,
   Link2,
   LogOut,
   Plus,
@@ -42,11 +43,13 @@ import { Logo, Spinner, Sheet, Empty, PaymentRow, Avatar } from "./ui";
 import { PaymentDetail } from "./payment-detail";
 import {
   api,
+  continueArcCashout,
   continueArcFunding,
   download,
   errorText,
   shareLink,
   signIn,
+  startArcCashout,
   startArcFunding,
   type FundingTransfer,
 } from "@/lib/client";
@@ -75,6 +78,59 @@ const tabs = [
   { id: "payments", label: "Payments", Icon: ArrowDownLeft },
   { id: "links", label: "Pay links", Icon: Link2 },
   { id: "store", label: "Your store", Icon: Store },
+] as const;
+const US_STATES = [
+  "AL",
+  "AK",
+  "AZ",
+  "AR",
+  "CA",
+  "CO",
+  "CT",
+  "DE",
+  "DC",
+  "FL",
+  "GA",
+  "HI",
+  "ID",
+  "IL",
+  "IN",
+  "IA",
+  "KS",
+  "KY",
+  "LA",
+  "ME",
+  "MD",
+  "MA",
+  "MI",
+  "MN",
+  "MS",
+  "MO",
+  "MT",
+  "NE",
+  "NV",
+  "NH",
+  "NJ",
+  "NM",
+  "NY",
+  "NC",
+  "ND",
+  "OH",
+  "OK",
+  "OR",
+  "PA",
+  "RI",
+  "SC",
+  "SD",
+  "TN",
+  "TX",
+  "UT",
+  "VT",
+  "VA",
+  "WA",
+  "WV",
+  "WI",
+  "WY",
 ] as const;
 
 export function MerchantApp() {
@@ -155,6 +211,7 @@ function MerchantExperience({
   const [installPrompt, setInstallPrompt] = useState<InstallEvent>();
   const [assets, setAssets] = useState<AssetSnapshot>();
   const [fundOpen, setFundOpen] = useState(false);
+  const [cashoutOpen, setCashoutOpen] = useState(false);
   const reduced = useReducedMotion();
   const notify = useCallback((message: string) => setToast(message), []);
   const load = useCallback(async () => {
@@ -281,6 +338,23 @@ function MerchantExperience({
     refreshAssets().catch(() => {});
     const timer = setInterval(() => refreshAssets().catch(() => {}), 30_000);
     return () => clearInterval(timer);
+  }, [profile?.mode, activeWallet?.address, refreshAssets]);
+  useEffect(() => {
+    if (!profile || profile.mode === "demo" || !activeWallet) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("cashout") !== "complete") return;
+    localStorage.removeItem(
+      `settledesk:cashout:${activeWallet.address.toLowerCase()}:${profile.mode}`,
+    );
+    params.delete("cashout");
+    const query = params.toString();
+    window.history.replaceState(
+      {},
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}`,
+    );
+    setToast("Cash-out submitted. Coinbase will send the bank update.");
+    refreshAssets().catch(() => {});
   }, [profile?.mode, activeWallet?.address, refreshAssets]);
   useEffect(() => {
     if (!toast) return;
@@ -684,13 +758,34 @@ function MerchantExperience({
                             "Connected wallet"}
                       </small>
                     </div>
-                    <button
-                      className="button secondary arc-fund-button"
-                      onClick={() => setFundOpen(true)}
-                    >
-                      <Wallet size={17} />
-                      Bring money to Arc
-                    </button>
+                    <div className="arc-account-actions">
+                      <button
+                        className="button secondary arc-fund-button"
+                        aria-label="Bring money to Arc"
+                        title="Bring money to Arc"
+                        onClick={() =>
+                          profile.mode === "demo"
+                            ? notify("Connect a live wallet to fund Arc.")
+                            : setFundOpen(true)
+                        }
+                      >
+                        <Wallet size={17} />
+                        Bring in
+                      </button>
+                      <button
+                        className="button secondary arc-fund-button cashout-button"
+                        aria-label="Cash out to a bank"
+                        title="Cash out to a bank"
+                        onClick={() =>
+                          profile.mode === "demo"
+                            ? notify("Connect a live wallet to cash out.")
+                            : setCashoutOpen(true)
+                        }
+                      >
+                        <Landmark size={17} />
+                        Cash out
+                      </button>
+                    </div>
                   </section>
                   <div className="home-grid">
                     <div className="home-main">
@@ -1142,6 +1237,16 @@ function MerchantExperience({
           wallet={activeWallet}
           assets={assets}
           onClose={() => setFundOpen(false)}
+          onRefresh={refreshAssets}
+          notify={notify}
+        />
+      )}
+      {cashoutOpen && activeWallet && profile.mode !== "demo" && (
+        <CashoutSheet
+          profile={profile}
+          wallet={activeWallet}
+          assets={assets}
+          onClose={() => setCashoutOpen(false)}
           onRefresh={refreshAssets}
           notify={notify}
         />
@@ -1908,6 +2013,319 @@ function FundingSheet({
         <p className="center-note">
           Standard CCTP transfers can take several minutes. Network fees are
           shown before approval.
+        </p>
+      </div>
+    </Sheet>
+  );
+}
+
+type PendingCashout = FundingTransfer & {
+  amount: string;
+  cashoutId: string;
+  subdivision: string;
+};
+
+function CashoutSheet({
+  profile,
+  wallet,
+  assets,
+  onClose,
+  onRefresh,
+  notify,
+}: {
+  profile: Profile;
+  wallet: ConnectedWallet;
+  assets?: AssetSnapshot;
+  onClose: () => void;
+  onRefresh: () => Promise<void>;
+  notify: (text: string) => void;
+}) {
+  const mode = profile.mode === "mainnet" ? "mainnet" : "testnet";
+  const storageKey = `settledesk:cashout:${wallet.address.toLowerCase()}:${mode}`;
+  const [amount, setAmount] = useState("");
+  const [subdivision, setSubdivision] = useState("");
+  const [pending, setPending] = useState<PendingCashout>();
+  const [configured, setConfigured] = useState<boolean>();
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const next = JSON.parse(saved) as PendingCashout;
+        if (next.cashoutId && next.amount) {
+          setPending(next);
+          setAmount(next.amount);
+          setSubdivision(next.subdivision || "");
+        } else localStorage.removeItem(storageKey);
+      }
+    } catch {
+      localStorage.removeItem(storageKey);
+    }
+    api<{ enabled: boolean }>("cashout/config")
+      .then((value) => setConfigured(value.enabled))
+      .catch((e) => {
+        setConfigured(false);
+        setError(errorText(e));
+      });
+  }, [storageKey]);
+
+  function save(next?: PendingCashout) {
+    setPending(next);
+    if (next) localStorage.setItem(storageKey, JSON.stringify(next));
+    else localStorage.removeItem(storageKey);
+  }
+
+  async function start() {
+    setError("");
+    try {
+      if (mode !== "mainnet")
+        throw new Error("Switch your store to Arc mainnet before cashing out.");
+      if (!configured)
+        throw new Error(
+          "Bank cash-out is not connected yet. Add the Coinbase CDP keys first.",
+        );
+      if (!subdivision) throw new Error("Choose the state where you live.");
+      if (!amount || units(amount) < 1_000_000n)
+        throw new Error("Cash out at least 1 USDC.");
+      const cashoutId = crypto.randomUUID();
+      setBusy("Preparing a Circle quote…");
+      const result = await startArcCashout(
+        mode,
+        amount,
+        cashoutId,
+        wallet,
+        setBusy,
+      );
+      save({
+        ...result.transfer,
+        burnHash: result.burnHash,
+        amount,
+        cashoutId,
+        subdivision,
+      });
+      notify("USDC left Arc. Circle is verifying it now.");
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function continueTransfer() {
+    if (!pending) return;
+    setBusy("Checking with Circle…");
+    setError("");
+    try {
+      const next = await continueArcCashout(
+        mode,
+        pending.amount,
+        pending.cashoutId,
+        pending.burnHash as Hex,
+        wallet,
+        setBusy,
+      );
+      save({ ...pending, ...next });
+      if (next.status === "settled") {
+        await onRefresh();
+        notify("USDC is ready on Base. Continue to your bank.");
+      } else {
+        notify(
+          next.status === "ready"
+            ? "Ready to receive on Base."
+            : "Circle is still verifying the transfer.",
+        );
+      }
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function openBankCashout() {
+    if (!pending) return;
+    setBusy("Opening your secure bank cash-out…");
+    setError("");
+    try {
+      const result = await api<{ offrampUrl: string }>("cashout/offramp", {
+        amount: pending.amount,
+        sourceAddress: wallet.address,
+        subdivision: pending.subdivision,
+      });
+      window.location.assign(result.offrampUrl);
+    } catch (e) {
+      setError(errorText(e));
+      setBusy("");
+    }
+  }
+
+  const action =
+    pending?.status === "settled"
+      ? openBankCashout
+      : pending
+        ? continueTransfer
+        : start;
+  const disabled =
+    !!busy ||
+    pending?.status === "expired" ||
+    (!pending && (configured !== true || mode !== "mainnet")) ||
+    (pending?.status === "settled" && !configured);
+
+  return (
+    <Sheet
+      title={
+        pending?.status === "settled"
+          ? "Ready for your bank."
+          : pending
+            ? "Your cash-out is on its way."
+            : "Cash out to your bank."
+      }
+      subtitle="Arc USDC becomes dollars in your bank."
+      onClose={onClose}
+    >
+      <div className="funding-flow">
+        <div className="funding-route cashout-route">
+          <div>
+            <span className="chain-icon arc">∩</span>
+            <span>
+              <small>Arc</small>
+              <strong>{money(assets?.arcUsdc || "0", true)} USDC</strong>
+            </span>
+          </div>
+          <ArrowRight size={17} />
+          <div>
+            <span className="chain-icon base">—</span>
+            <span>
+              <small>Base</small>
+              <strong>USDC</strong>
+            </span>
+          </div>
+          <ArrowRight size={17} />
+          <div>
+            <span className="chain-icon bank">
+              <Landmark size={15} />
+            </span>
+            <span>
+              <small>Your bank</small>
+              <strong>USD</strong>
+            </span>
+          </div>
+        </div>
+
+        {pending ? (
+          <div className="funding-pending">
+            <span className={`status-orb ${pending.status}`}>
+              {pending.status === "settled" ? <Check size={22} /> : "C"}
+            </span>
+            <div>
+              <strong>{money(pending.amount, true)} USDC</strong>
+              <p>
+                {pending.status === "settled"
+                  ? "Safely in your Base wallet. Coinbase will show the USD payout and bank timing before you sell."
+                  : pending.status === "ready"
+                    ? "Circle verified it. One confirmation receives it in your Base wallet."
+                    : pending.status === "expired"
+                      ? "This verification expired. Your funds are still recoverable."
+                      : "Circle is verifying the Arc transaction."}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <label className="funding-amount">
+              Amount to send to your bank
+              <div>
+                <span>$</span>
+                <input
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={amount}
+                  onChange={(event) => setAmount(event.target.value)}
+                  aria-label="USDC to cash out"
+                />
+                <strong>USDC</strong>
+              </div>
+              <small>
+                Available on Arc: {money(assets?.arcUsdc || "0", true)} USDC
+              </small>
+            </label>
+            <label className="field cashout-state">
+              Your U.S. state
+              <select
+                value={subdivision}
+                onChange={(event) => setSubdivision(event.target.value)}
+              >
+                <option value="">Choose state</option>
+                {US_STATES.map((state) => (
+                  <option key={state} value={state}>
+                    {state}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
+
+        <div className="gentle-note">
+          <ShieldCheck size={18} />
+          <span>
+            {pending?.status === "settled"
+              ? "Coinbase handles identity checks, the USDC sale, and the ACH bank payout. You review everything there before confirming."
+              : "Circle moves the exact amount to your own Base wallet first. SettleDesk never holds your money."}
+          </span>
+        </div>
+
+        {configured === false && (
+          <p role="status" className="processor-note">
+            Coinbase bank cash-out needs its two CDP keys in the deployment.
+            Your Arc balance stays untouched until it is connected.
+          </p>
+        )}
+        {mode !== "mainnet" && (
+          <p role="status" className="processor-note">
+            Bank cash-out uses real funds and is available on Arc mainnet only.
+          </p>
+        )}
+        {error && (
+          <p role="alert" className="error-box">
+            {error}
+          </p>
+        )}
+
+        <button
+          className="button primary wide"
+          disabled={disabled}
+          onClick={action}
+        >
+          {busy ? (
+            <>
+              <Spinner />
+              {busy}
+            </>
+          ) : pending?.status === "settled" ? (
+            <>
+              Continue to bank
+              <ArrowUpRight size={18} />
+            </>
+          ) : pending ? (
+            <>
+              {pending.status === "ready"
+                ? "Receive on Base"
+                : "Check transfer"}
+              <ArrowRight size={18} />
+            </>
+          ) : (
+            <>
+              Move USDC with CCTP
+              <ArrowRight size={18} />
+            </>
+          )}
+        </button>
+        <p className="center-note">
+          U.S. bank payout is provided by Coinbase and depends on eligibility
+          and account verification.
         </p>
       </div>
     </Sheet>
