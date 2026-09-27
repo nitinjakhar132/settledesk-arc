@@ -2,7 +2,7 @@
 
 import { PrivyProvider } from "@privy-io/react-auth";
 import { usePathname } from "next/navigation";
-import { base, baseSepolia } from "viem/chains";
+import { arbitrum, base, baseSepolia } from "viem/chains";
 import { arc, arcTestnet } from "@/lib/chains";
 
 export function AppProviders({
@@ -46,7 +46,7 @@ export function AppProviders({
         // Production workspaces settle on Arc mainnet. Testnet remains
         // available as an explicit store setting, but must not be the wallet
         // default for newly created email/SMS users.
-        supportedChains: [arc, base, arcTestnet, baseSepolia],
+        supportedChains: [arc, base, arbitrum, arcTestnet, baseSepolia],
         defaultChain: arc,
       }}
     >

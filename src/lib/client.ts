@@ -594,17 +594,22 @@ export async function completeTransfer(
   return api<{ payment: Payment }>(`payments/${payment.id}/refresh`, {});
 }
 export function errorText(error: unknown) {
-  const value = error as { shortMessage?: string; message?: string };
-  if (
-    value?.message?.includes("rejected") ||
-    value?.message?.includes("denied")
-  )
+  const value = error as {
+    shortMessage?: string;
+    message?: string;
+    response?: { data?: { message?: string; errorCode?: string } };
+  };
+  const message =
+    typeof error === "string"
+      ? error
+      : value?.response?.data?.message || value?.shortMessage || value?.message;
+  if (/rejected|denied|cancelled/i.test(message || ""))
     return "You cancelled in your wallet. Nothing new was sent.";
-  return (
-    value?.shortMessage ||
-    value?.message ||
-    "Something went wrong. Please try again."
-  );
+  if (
+    /Current chain id:.*does not match expected chain id:/i.test(message || "")
+  )
+    return "Your wallet is on another network. Switch to the selected payment network and try again.";
+  return message || "Something went wrong. Please try again.";
 }
 export async function shareLink(url: string, title: string) {
   if (navigator.share) {

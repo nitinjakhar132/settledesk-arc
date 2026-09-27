@@ -277,7 +277,7 @@ export function AnyTokenPay({
         onPaid(result.payment);
       } else {
         onBusy("Confirm the Relay payment in your wallet…");
-        await executeRelayPayment(route.quote, activeWallet, onBusy);
+        await executeRelayPayment(route.quote, chainId, activeWallet, onBusy);
         onBusy("Verifying USDC arrival on Arc…");
         const result = await api<{ payment: Payment }>(
           `payments/${payment.id}/relay-confirm`,
@@ -307,8 +307,7 @@ export function AnyTokenPay({
     );
 
   const cctpRoute =
-    route?.kind === "cctp" ||
-    (route?.kind === "demo" && route.rail === "cctp");
+    route?.kind === "cctp" || (route?.kind === "demo" && route.rail === "cctp");
 
   return (
     <div className="any-token-panel">
@@ -396,9 +395,7 @@ export function AnyTokenPay({
       ) : (
         <>
           <div className="route-choice">
-            <span
-              className={cctpRoute ? "circle-route" : "relay-route"}
-            >
+            <span className={cctpRoute ? "circle-route" : "relay-route"}>
               {cctpRoute ? "C" : "R"}
             </span>
             <div>

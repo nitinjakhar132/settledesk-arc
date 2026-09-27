@@ -6,7 +6,10 @@ const ALLOWED = new Set([
   "intents/status",
   "intents/status/v2",
   "intents/status/v3",
-  "execute/permit",
+  "execute",
+  "execute/permits",
+  "transactions/index",
+  "transactions/single",
 ]);
 
 async function handler(
