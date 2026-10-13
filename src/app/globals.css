@@ -1547,6 +1547,52 @@ code {
   gap: 7px;
   color: #707e63;
 }
+.paying-wallet {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 0;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.paying-wallet > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.paying-wallet span,
+.paying-wallet small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.paying-wallet strong {
+  font-size: 13px;
+}
+.checkout-inline-status {
+  margin: 0 0 12px;
+  color: var(--green);
+  font-size: 12px;
+  text-align: center;
+}
+.checkout-progress {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 16px;
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.checkout-progress strong {
+  font-size: 13px;
+}
+.checkout-progress p {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
 .startup-recovery {
   display: flex;
   flex-wrap: wrap;

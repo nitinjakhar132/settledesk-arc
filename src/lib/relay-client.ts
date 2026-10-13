@@ -8,6 +8,9 @@ import {
 import { configureDynamicChains } from "@relayprotocol/relay-sdk/chain-utils";
 import {
   createWalletClient,
+  createPublicClient,
+  erc20Abi,
+  http,
   custom,
   numberToHex,
   type Address,
@@ -41,15 +44,28 @@ export async function executeRelayPayment(
   connectedWallet: ConnectedWallet,
   onStep: (step: string) => void,
 ) {
-  await prepareRelay();
+  onStep("Preparing the payment network…");
+  await preparationTimeout(
+    prepareRelay(),
+    "The payment network took too long to load. Please try again.",
+  );
   const quotedChainId = quote.details?.currencyIn?.currency?.chainId;
   if (quotedChainId !== originChainId)
     throw new Error("The payment route changed. Choose the token again.");
   const source = getClient().chains.find((chain) => chain.id === originChainId);
   if (!source?.viemChain)
     throw new Error("Relay no longer supports this payment network.");
+  onStep("Checking funds in your selected wallet…");
+  await assertRelayFunds(
+    quote,
+    source.viemChain,
+    connectedWallet.address as Address,
+  );
   onStep(`Switching your wallet to ${source.displayName}…`);
-  const wallet = await walletOnRelayChain(connectedWallet, source.viemChain);
+  const wallet = await preparationTimeout(
+    walletOnRelayChain(connectedWallet, source.viemChain),
+    `Your wallet did not finish switching to ${source.displayName}. Open your wallet, select that network, then try again. No payment was submitted.`,
+  );
   onStep("Confirm the Relay payment in your wallet…");
   return getClient().actions.execute({
     quote,
@@ -69,6 +85,13 @@ export async function walletOnRelayChain(
   connectedWallet: ConnectedWallet,
   chain: Chain,
 ) {
+  const initialProvider = await connectedWallet.getEthereumProvider();
+  const initialWallet = createWalletClient({
+    account: connectedWallet.address as Address,
+    chain,
+    transport: custom(initialProvider),
+  });
+  if ((await initialWallet.getChainId()) === chain.id) return initialWallet;
   try {
     await connectedWallet.switchChain(chain.id);
   } catch (error) {
@@ -126,6 +149,56 @@ export async function walletOnRelayChain(
     chain,
     transport: custom(provider),
   });
+}
+
+// Bound only read/setup operations. Never race a submitted payment against a
+// timeout: doing so could invite a duplicate payment while the first is pending.
+async function preparationTimeout<T>(
+  operation: Promise<T>,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), 20000);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export async function assertRelayFunds(
+  quote: Execute,
+  chain: Chain,
+  address: Address,
+) {
+  const input = quote.details?.currencyIn;
+  if (!input?.currency?.address || !input.amount || !/^\d+$/.test(input.amount))
+    throw new Error(
+      "The payment quote is incomplete. Choose your token again.",
+    );
+  const client = createPublicClient({
+    chain,
+    transport: http(undefined, { timeout: 10000, retryCount: 0 }),
+  });
+  const currency = input.currency.address as Address;
+  const native =
+    currency.toLowerCase() === "0x0000000000000000000000000000000000000000";
+  const balance = native
+    ? await client.getBalance({ address })
+    : await client.readContract({
+        address: currency,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [address],
+      });
+  if (balance < BigInt(input.amount))
+    throw new Error(
+      `Your selected wallet does not have enough ${input.currency.symbol || "tokens"} on ${chain.name}. Use another wallet that holds those funds, or fund this wallet first. No payment was submitted.`,
+    );
 }
 
 export type RelayExecutableQuote = Execute & { requestId: string };

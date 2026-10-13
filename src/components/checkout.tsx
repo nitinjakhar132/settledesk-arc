@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   usePrivy,
+  useConnectWallet,
   useWallets,
   type ConnectedWallet,
 } from "@privy-io/react-auth";
@@ -29,6 +30,7 @@ import {
   completeTransfer,
   download,
   errorText,
+  isEmbeddedWallet,
   sendPayment,
   type Quote,
 } from "@/lib/client";
@@ -53,6 +55,7 @@ type WalletSession = {
   walletsReady: boolean;
   activeWallet?: ConnectedWallet;
   login: () => void;
+  connectWallet?: () => void;
 };
 type PayPalNamespace = {
   FUNDING: { PAYPAL: string; VENMO: string };
@@ -98,18 +101,30 @@ function WalletCheckout({
   id: string;
   paymentConfig: PaymentConfig;
 }) {
-  const { ready: privyReady, authenticated, login } = usePrivy();
+  const { ready: privyReady, authenticated, login, user } = usePrivy();
   const { ready: walletsReady, wallets } = useWallets();
+  const [payingAddress, setPayingAddress] = useState<string>();
+  const { connectWallet } = useConnectWallet({
+    onSuccess: ({ wallet }) => setPayingAddress(wallet.address.toLowerCase()),
+  });
+  const activeWallet =
+    wallets.find((wallet) => wallet.address.toLowerCase() === payingAddress) ||
+    wallets.find(
+      (wallet) =>
+        wallet.address.toLowerCase() === user?.wallet?.address.toLowerCase(),
+    ) ||
+    wallets[0];
   return (
     <CheckoutExperience
       id={id}
       paymentConfig={paymentConfig}
       walletSession={{
         privyReady,
-        authenticated,
+        authenticated: authenticated || !!activeWallet,
         login,
         walletsReady,
-        activeWallet: wallets[0],
+        activeWallet,
+        connectWallet: () => connectWallet(),
       }}
     />
   );
@@ -124,8 +139,14 @@ function CheckoutExperience({
   paymentConfig: PaymentConfig;
   walletSession: WalletSession;
 }) {
-  const { privyReady, authenticated, login, walletsReady, activeWallet } =
-    walletSession;
+  const {
+    privyReady,
+    authenticated,
+    login,
+    connectWallet,
+    walletsReady,
+    activeWallet,
+  } = walletSession;
   const [payment, setPayment] = useState<Payment>();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -501,7 +522,9 @@ function CheckoutExperience({
                       authenticated={authenticated}
                       login={login}
                       activeWallet={activeWallet}
+                      connectWallet={connectWallet}
                       disabled={!!busy}
+                      status={busy}
                       onBusy={setBusy}
                       onPaid={setPayment}
                       onError={setError}
@@ -631,6 +654,21 @@ function CheckoutExperience({
           >
             Refresh verification
           </button>
+        )}
+        {busy && (
+          <div className="checkout-progress" role="status" aria-live="polite">
+            <Spinner />
+            <div>
+              <strong>{busy}</strong>
+              {activeWallet && (
+                <p>
+                  {isEmbeddedWallet(activeWallet)
+                    ? "Your email wallet approves payments here in the browser."
+                    : `Open ${activeWallet.walletClientType === "unknown" ? "your connected wallet" : activeWallet.walletClientType} to check for a network or payment request.`}
+                </p>
+              )}
+            </div>
+          </div>
         )}
         {error && (
           <p className="error-box" role="alert">

@@ -1,16 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ConnectedWallet } from "@privy-io/react-auth";
 import { ArrowLeft, ArrowRight, Check, Coins, Search, X } from "lucide-react";
 import { isAddress } from "viem";
-import { api, errorText, sendCctpPayment, type Quote } from "@/lib/client";
+import {
+  api,
+  errorText,
+  isEmbeddedWallet,
+  sendCctpPayment,
+  type Quote,
+} from "@/lib/client";
 import { cctpChains, isCctpUsdc } from "@/lib/cctp-chains";
 import {
   executeRelayPayment,
   type RelayExecutableQuote,
 } from "@/lib/relay-client";
-import { money, type Payment } from "@/lib/model";
+import { money, shortAddress, type Payment } from "@/lib/model";
 import { Spinner } from "./ui";
 
 type Token = {
@@ -99,7 +105,9 @@ export function AnyTokenPay({
   authenticated,
   login,
   activeWallet,
+  connectWallet,
   disabled,
+  status,
   onBusy,
   onPaid,
   onError,
@@ -109,7 +117,9 @@ export function AnyTokenPay({
   authenticated: boolean;
   login: () => void;
   activeWallet?: ConnectedWallet;
+  connectWallet?: () => void;
   disabled: boolean;
+  status?: string;
   onBusy: (message: string) => void;
   onPaid: (payment: Payment) => void;
   onError: (message: string) => void;
@@ -121,6 +131,9 @@ export function AnyTokenPay({
   const [customCurrency, setCustomCurrency] = useState("");
   const [search, setSearch] = useState("");
   const [route, setRoute] = useState<RouteQuote>();
+  useEffect(() => {
+    setRoute(undefined);
+  }, [activeWallet?.address]);
   const chain = catalog?.chains.find((value) => value.id === chainId);
   const tokens = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -203,7 +216,7 @@ export function AnyTokenPay({
       return;
     }
     if (payment.mode !== "demo" && !authenticated) {
-      login();
+      (connectWallet || login)();
       return;
     }
     if (payment.mode !== "demo" && !activeWallet) {
@@ -311,6 +324,33 @@ export function AnyTokenPay({
 
   return (
     <div className="any-token-panel">
+      {payment.mode !== "demo" && (
+        <div className="paying-wallet">
+          <div>
+            <span>Paying wallet</span>
+            <strong>
+              {activeWallet
+                ? `${isEmbeddedWallet(activeWallet) ? "Email wallet" : activeWallet.walletClientType === "unknown" ? "Connected wallet" : activeWallet.walletClientType} · ${shortAddress(activeWallet.address)}`
+                : "No wallet connected"}
+            </strong>
+            {isEmbeddedWallet(activeWallet) && (
+              <small>
+                To use funds in Family or another app, connect that wallet
+                below.
+              </small>
+            )}
+          </div>
+          {connectWallet && (
+            <button
+              className="button secondary"
+              disabled={disabled}
+              onClick={connectWallet}
+            >
+              {activeWallet ? "Use another wallet" : "Connect wallet"}
+            </button>
+          )}
+        </div>
+      )}
       <div className="any-token-heading">
         <button aria-label="Close token payment" onClick={() => setOpen(false)}>
           {route ? <ArrowLeft size={17} /> : <X size={17} />}
@@ -429,6 +469,11 @@ export function AnyTokenPay({
               <strong>Your connected wallet</strong>
             </p>
           </div>
+          {status && (
+            <p className="checkout-inline-status" aria-live="polite">
+              {status}
+            </p>
+          )}
           <button
             className="button primary wide"
             disabled={disabled}
