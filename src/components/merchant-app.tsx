@@ -25,7 +25,6 @@ import {
   EyeOff,
   Home,
   Landmark,
-  Link2,
   LogOut,
   Plus,
   ReceiptText,
@@ -39,7 +38,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { Logo, Spinner, Sheet, Empty, PaymentRow, Avatar } from "./ui";
+import { Logo, Spinner, Sheet, Empty, PaymentRow } from "./ui";
 import { PaymentDetail } from "./payment-detail";
 import {
   api,
@@ -68,15 +67,14 @@ import {
   type Mode,
 } from "@/lib/model";
 
-type Tab = "home" | "payments" | "links" | "store";
+type Tab = "home" | "payments" | "store";
 type InstallEvent = Event & {
   prompt(): Promise<void>;
   userChoice: Promise<{ outcome: string }>;
 };
 const tabs = [
   { id: "home", label: "Counter", Icon: Home },
-  { id: "payments", label: "Payments", Icon: ArrowDownLeft },
-  { id: "links", label: "Pay links", Icon: Link2 },
+  { id: "payments", label: "Payment history", Icon: ArrowDownLeft },
   { id: "store", label: "Your store", Icon: Store },
 ] as const;
 const US_STATES = [
@@ -726,7 +724,7 @@ function MerchantExperience({
                       onClick={() => setCreateOpen(true)}
                     >
                       <Plus size={18} />
-                      New sale
+                      New sale payment link
                     </button>
                   </div>
                   <section className="arc-account-card">
@@ -874,7 +872,7 @@ function MerchantExperience({
                         onClick={() => setCreateOpen(true)}
                       >
                         <Plus size={19} />
-                        New sale
+                        New sale payment link
                         <ArrowUpRight size={18} />
                       </button>
                       {attention.length > 0 && (
@@ -1082,85 +1080,6 @@ function MerchantExperience({
                       />
                     )}
                   </section>
-                </>
-              )}
-              {tab === "links" && (
-                <>
-                  <div className="page-heading">
-                    <div>
-                      <div className="eyebrow">
-                        ASK NICELY. GET PAID EASILY.
-                      </div>
-                      <h1>
-                        A link is all it takes<span className="green">.</span>
-                      </h1>
-                      <p>Share it in a message. Or let them scan.</p>
-                    </div>
-                    <button
-                      className="button primary"
-                      onClick={() => setCreateOpen(true)}
-                    >
-                      <Plus size={18} />
-                      New pay link
-                    </button>
-                  </div>
-                  <div className="links-grid">
-                    {payments
-                      .filter((p) => !p.transfer)
-                      .map((p) => (
-                        <article className="pay-link-card" key={p.id}>
-                          <div className="section-heading">
-                            <span className="link-card-icon">
-                              <Link2 size={21} />
-                            </span>
-                            <span className="badge requested">
-                              <span />
-                              Awaiting payment
-                            </span>
-                          </div>
-                          <h2>${money(p.amount)}</h2>
-                          <p>{p.description}</p>
-                          <div className="link-customer">
-                            <Avatar name={p.customer} />
-                            <span>
-                              {p.customer}
-                              <small>{p.reference}</small>
-                            </span>
-                          </div>
-                          <div className="link-card-actions">
-                            <button
-                              className="button secondary"
-                              onClick={() =>
-                                shareLink(
-                                  `${location.origin}/pay/${p.id}`,
-                                  `Payment for ${p.description}`,
-                                ).then(notify)
-                              }
-                            >
-                              <Copy size={15} />
-                              Share link
-                            </button>
-                            <a
-                              className="icon-button"
-                              href={`/pay/${p.id}`}
-                              aria-label={`Open payment link for ${p.customer}`}
-                            >
-                              <ArrowUpRight size={19} />
-                            </a>
-                          </div>
-                        </article>
-                      ))}
-                    <button
-                      className="new-link-card"
-                      onClick={() => setCreateOpen(true)}
-                    >
-                      <span>
-                        <Plus size={26} />
-                      </span>
-                      <strong>Something new in the works?</strong>
-                      <p>Create a payment link</p>
-                    </button>
-                  </div>
                 </>
               )}
               {tab === "store" && (
@@ -1612,7 +1531,7 @@ function CreatePayment({
             </>
           )}
           <button className="button primary wide" onClick={newSale}>
-            <Plus size={18} /> New sale
+            <Plus size={18} /> New sale payment link
           </button>
           <p className="center-note">
             {salePaid

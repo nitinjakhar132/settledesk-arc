@@ -855,6 +855,17 @@ code {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
+}
+.arc-account-actions .arc-fund-button {
+  width: auto;
+  min-width: 0;
+  padding: 10px 12px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.arc-account-actions .arc-fund-button svg {
+  flex-shrink: 0;
 }
 .cashout-button {
   border-color: #435137;
@@ -878,7 +889,7 @@ code {
   background:
     radial-gradient(ellipse at top right, #2d3b1d36, transparent 70%), #191d16;
   border-radius: 20px;
-  padding: 25px 27px 21px;
+  padding: 20px 24px 18px;
   overflow: hidden;
 }
 .balance-top {
@@ -952,8 +963,8 @@ code {
   color: #536146;
 }
 .chart {
-  height: 112px;
-  margin: 24px -3px 0;
+  height: 76px;
+  margin: 16px -3px 0;
   overflow: visible;
 }
 .chart svg {
@@ -4306,11 +4317,56 @@ code {
     margin-top: 4px;
   }
   .chart {
-    height: 70px;
-    margin-top: 20px;
+    height: 32px;
+    margin-top: 10px;
   }
   .balance-card {
-    padding-top: 18px;
+    padding: 14px 18px;
+  }
+  .balance-value {
+    font-size: 44px;
+    margin-top: 6px;
+  }
+  .balance-value .balance-cents {
+    font-size: 32px;
+  }
+  .balance-caption {
+    margin-top: 6px;
+    flex-wrap: wrap;
+  }
+  .arc-account-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 12px;
+    margin-bottom: 14px;
+  }
+  .arc-account-main {
+    min-width: 0;
+    gap: 8px;
+  }
+  .arc-account-icon {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+  }
+  .arc-account-main strong {
+    font-size: 19px;
+  }
+  .arc-account-actions {
+    gap: 6px;
+  }
+  .arc-account-actions .arc-fund-button {
+    min-height: 44px;
+    padding: 8px;
+    gap: 5px;
+    font-size: 10px;
+  }
+  .arc-account-actions .arc-fund-button svg {
+    width: 14px;
+    height: 14px;
+  }
+  .page-heading {
+    margin-bottom: 16px;
   }
   .chart-footer {
     margin-top: 5px;
@@ -4446,6 +4502,15 @@ code {
 }
 .balance-bottom small {
   color: #98a38b;
+}
+@media (max-width: 370px) {
+  .arc-account-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .arc-account-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 @media print {
   .sidebar,
