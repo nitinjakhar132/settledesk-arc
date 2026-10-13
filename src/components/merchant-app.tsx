@@ -193,7 +193,9 @@ function MerchantExperience({
   const authAttempt = useRef("");
   const [profile, setProfile] = useState<Profile | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [slowStartup, setSlowStartup] = useState(false);
+  const [startupMessage, setStartupMessage] = useState("Opening your store…");
   const [tab, setTab] = useState<Tab>("home");
   const [selected, setSelected] = useState<string>();
   const [createOpen, setCreateOpen] = useState(false);
@@ -263,7 +265,11 @@ function MerchantExperience({
       setLoading(false);
       return;
     }
-    if (!walletsReady) return;
+    if (!walletsReady) {
+      setStartupMessage("Reconnecting your wallet…");
+      setLoading(true);
+      return;
+    }
     if (!activeWallet) {
       setError("Your wallet is still being created. Please try again.");
       setLoading(false);
@@ -273,6 +279,7 @@ function MerchantExperience({
     if (authAttempt.current === key) return;
     authAttempt.current = key;
     let active = true;
+    setStartupMessage("Opening your store…");
     setLoading(true);
     setError("");
     api<{ profile: Profile | null }>("session")
@@ -282,9 +289,14 @@ function MerchantExperience({
           sessionProfile.address?.toLowerCase() !== key ||
           sessionProfile.mode === "demo"
         ) {
+          if (!active) return;
+          setStartupMessage("Open your wallet to approve the sign-in message.");
           await signIn(activeWallet);
         }
-        if (active) await load();
+        if (active) {
+          setStartupMessage("Opening your store…");
+          await load();
+        }
       })
       .catch((e) => {
         authAttempt.current = "";
@@ -307,9 +319,18 @@ function MerchantExperience({
   ]);
   useEffect(() => {
     if (privyReady) return;
-    const timer = setTimeout(() => setLoading(false), 3500);
+    const timer = setTimeout(() => {
+      setLoading(false);
+      setSlowStartup(true);
+    }, 8000);
     return () => clearTimeout(timer);
   }, [privyReady]);
+  useEffect(() => {
+    if (!loading) return;
+    setSlowStartup(false);
+    const timer = setTimeout(() => setSlowStartup(true), 10000);
+    return () => clearTimeout(timer);
+  }, [loading]);
   const refreshAssets = useCallback(async () => {
     if (!profile || profile.mode === "demo" || !activeWallet) return;
     const next = await readAssetSnapshot(
@@ -525,7 +546,36 @@ function MerchantExperience({
       <main className="boot">
         <Logo />
         <Spinner />
-        <p>Making room for a calmer day.</p>
+        <p role="status">
+          {demoOnly ? "Opening your demo store…" : startupMessage}
+        </p>
+        {slowStartup && (
+          <div className="startup-recovery">
+            <p>If no request appears in your wallet, reconnect to try again.</p>
+            <button
+              className="button secondary"
+              onClick={() => location.reload()}
+            >
+              Reload app
+            </button>
+            {!demoOnly && authenticated && (
+              <button
+                className="button primary"
+                onClick={async () => {
+                  try {
+                    await privyLogout();
+                    location.reload();
+                  } catch (e) {
+                    setError(errorText(e));
+                    setLoading(false);
+                  }
+                }}
+              >
+                Reconnect wallet
+              </button>
+            )}
+          </div>
+        )}
       </main>
     );
   if (!profile)
@@ -584,6 +634,20 @@ function MerchantExperience({
             <span>Email</span>
             <span>Mobile</span>
           </div>
+          {!privyReady && slowStartup && (
+            <div className="startup-recovery" role="status">
+              <p>
+                Secure sign-in is taking longer than expected. Check your
+                connection and reload to try again.
+              </p>
+              <button
+                className="button secondary"
+                onClick={() => location.reload()}
+              >
+                Reload app
+              </button>
+            </div>
+          )}
           {error && (
             <div className="error-box" role="alert">
               {error}
@@ -2273,6 +2337,14 @@ function StoreSettings({
   const [name, setName] = useState(profile.name);
   const [mode, setMode] = useState<Mode>(profile.mode);
   const [collectTax, setCollectTax] = useState(!!profile.collectTax);
+  const [editor, setEditor] = useState<"details" | "network" | "tax">();
+  function openEditor(section: "details" | "network" | "tax") {
+    setName(profile.name);
+    setMode(profile.mode);
+    setCollectTax(!!profile.collectTax);
+    setError("");
+    setEditor(section);
+  }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   return (
@@ -2286,112 +2358,47 @@ function StoreSettings({
           <p>The small details that make it yours.</p>
         </div>
       </div>
-      <div className="settings-layout">
-        <section className="settings-card">
-          <span className="store-monogram large">
-            {profile.name.slice(0, 1)}
-          </span>
-          <h2>{profile.name}</h2>
-          <p>
-            {profile.mode === "demo"
-              ? "Your private demo workspace"
-              : shortAddress(profile.address)}
-          </p>
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              setBusy(true);
-              setError("");
-              try {
-                const data = await api<{ profile: Profile }>("profile", {
-                  name,
-                  mode,
-                  collectTax,
-                });
-                onProfile(data.profile);
-                notify("Store details saved");
-              } catch (err) {
-                setError(errorText(err));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            <label className="field">
-              Store name
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                maxLength={50}
-                required
-              />
-            </label>
-            <label className="field">
-              Payment network
-              <select
-                value={mode}
-                disabled={profile.mode === "demo"}
-                onChange={(e) => setMode(e.target.value as Mode)}
-              >
-                {profile.mode === "demo" ? (
-                  <option value="demo">Demo · simulated funds</option>
-                ) : (
-                  <>
-                    <option value="testnet">Testnet · test USDC</option>
-                    <option value="mainnet">Mainnet · real USDC</option>
-                  </>
-                )}
-              </select>
-            </label>
-            {mode === "mainnet" && (
-              <p className="center-note">
-                New payment links will accept real USDC. Existing links keep
-                their original network.
-              </p>
-            )}
-            <label className={`tax-feature-card ${collectTax ? "active" : ""}`}>
-              <span className="tax-feature-check" aria-hidden="true">
-                {collectTax ? <Check size={16} /> : <ReceiptText size={16} />}
-              </span>
-              <span>
-                <strong>Collect tax</strong>
-                <small>
-                  Calculate, collect, and report tax on eligible global card
-                  payments with Stripe Tax.
-                </small>
-              </span>
-              <input
-                type="checkbox"
-                checked={collectTax}
-                onChange={(e) => setCollectTax(e.target.checked)}
-                aria-label="Collect tax by default"
-              />
-            </label>
-            {collectTax && (
-              <p className="tax-setup-note">
-                Applies to new sales. Stripe uses your registered tax regions
-                and the buyer’s billing address—Arc Counter never guesses a
-                rate.
-                <a
-                  href="https://dashboard.stripe.com/test/settings/tax"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Review Stripe Tax setup <ArrowUpRight size={13} />
-                </a>
-              </p>
-            )}
-            {error && (
-              <p className="error-box" role="alert">
-                {error}
-              </p>
-            )}
-            <button className="button primary wide" disabled={busy}>
-              {busy ? <Spinner /> : "Save changes"}
-            </button>
-          </form>
-        </section>
+      <div className="settings-layout compact-store-settings">
         <section className="settings-menu">
+          <button onClick={() => openEditor("details")}>
+            <Store size={20} />
+            <span>
+              <strong>Store details</strong>
+              <small>
+                {profile.name} ·{" "}
+                {profile.mode === "demo"
+                  ? "Demo workspace"
+                  : shortAddress(profile.address)}
+              </small>
+            </span>
+            <ChevronRight size={17} />
+          </button>
+          <button onClick={() => openEditor("network")}>
+            <Activity size={20} />
+            <span>
+              <strong>Payment network</strong>
+              <small>
+                {profile.mode === "mainnet"
+                  ? "Arc mainnet · real USDC"
+                  : profile.mode === "testnet"
+                    ? "Arc testnet · test USDC"
+                    : "Demo · simulated funds"}
+              </small>
+            </span>
+            <ChevronRight size={17} />
+          </button>
+          <button onClick={() => openEditor("tax")}>
+            <ReceiptText size={20} />
+            <span>
+              <strong>Collect tax</strong>
+              <small>
+                {profile.collectTax
+                  ? "Enabled for eligible card payments"
+                  : "Off · optional Stripe Tax"}
+              </small>
+            </span>
+            <ChevronRight size={17} />
+          </button>
           {[
             {
               Icon: Wallet,
@@ -2443,6 +2450,132 @@ function StoreSettings({
           </div>
         </section>
       </div>
+      {editor && (
+        <Sheet
+          title={
+            editor === "details"
+              ? "Store details"
+              : editor === "network"
+                ? "Payment network"
+                : "Collect tax"
+          }
+          onClose={() => {
+            if (!busy) setEditor(undefined);
+          }}
+        >
+          +{" "}
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setBusy(true);
+              setError("");
+              try {
+                const data = await api<{ profile: Profile }>("profile", {
+                  name,
+                  mode,
+                  collectTax,
+                });
+                onProfile(data.profile);
+                notify("Store details saved");
+                setEditor(undefined);
+              } catch (err) {
+                setError(errorText(err));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {editor === "details" && (
+              <label className="field">
+                Store name
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  maxLength={50}
+                  required
+                />
+              </label>
+            )}
+            {editor === "network" && (
+              <>
+                <label className="field">
+                  Payment network
+                  <select
+                    value={mode}
+                    disabled={profile.mode === "demo"}
+                    onChange={(e) => setMode(e.target.value as Mode)}
+                  >
+                    {profile.mode === "demo" ? (
+                      <option value="demo">Demo · simulated funds</option>
+                    ) : (
+                      <>
+                        <option value="testnet">Testnet · test USDC</option>
+                        <option value="mainnet">Mainnet · real USDC</option>
+                      </>
+                    )}
+                  </select>
+                </label>
+                {mode === "mainnet" && (
+                  <p className="center-note">
+                    New payment links will accept real USDC. Existing links keep
+                    their original network.
+                  </p>
+                )}
+              </>
+            )}
+            {editor === "tax" && (
+              <>
+                <label
+                  className={`tax-feature-card ${collectTax ? "active" : ""}`}
+                >
+                  <span className="tax-feature-check" aria-hidden="true">
+                    {collectTax ? (
+                      <Check size={16} />
+                    ) : (
+                      <ReceiptText size={16} />
+                    )}
+                  </span>
+                  <span>
+                    <strong>Collect tax</strong>
+                    <small>
+                      Calculate, collect, and report tax on eligible global card
+                      payments with Stripe Tax.
+                    </small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={collectTax}
+                    onChange={(e) => setCollectTax(e.target.checked)}
+                    aria-label="Collect tax by default"
+                  />
+                </label>
+                {collectTax && (
+                  <p className="tax-setup-note">
+                    Applies to new sales. Stripe uses your registered tax
+                    regions and the buyer’s billing address—Arc Counter never
+                    guesses a rate.
+                    <a
+                      href="https://dashboard.stripe.com/test/settings/tax"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Review Stripe Tax setup <ArrowUpRight size={13} />
+                    </a>
+                  </p>
+                )}
+              </>
+            )}
+            {error && (
+              <p className="error-box" role="alert">
+                {error}
+              </p>
+            )}
+            <button className="button primary wide" disabled={busy}>
+              {busy ? <Spinner /> : "Save changes"}
+            </button>
+          </form>
+        </Sheet>
+      )}
     </>
   );
 }

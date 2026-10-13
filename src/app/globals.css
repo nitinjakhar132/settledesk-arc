@@ -1547,6 +1547,21 @@ code {
   gap: 7px;
   color: #707e63;
 }
+.startup-recovery {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  max-width: 380px;
+  margin: 20px auto 0;
+  padding: 0 16px;
+  text-align: center;
+}
+.startup-recovery p {
+  width: 100%;
+  color: var(--muted);
+  font-size: 13px;
+}
 .app-footer {
   margin-top: 43px;
   padding: 22px 0;
@@ -1838,6 +1853,14 @@ code {
   width: fit-content;
   margin-top: 8px;
   color: #b5d58f;
+}
+.settings-layout.compact-store-settings {
+  display: block;
+  max-width: 720px;
+}
+.compact-store-settings .settings-menu {
+  width: 100%;
+  padding-top: 0;
 }
 .settings-menu > button {
   display: flex;
