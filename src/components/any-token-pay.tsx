@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ConnectedWallet } from "@privy-io/react-auth";
-import { ArrowLeft, ArrowRight, Check, Coins, Search, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Coins, X } from "lucide-react";
 import { isAddress } from "viem";
 import {
   api,
@@ -18,6 +18,8 @@ import {
 } from "@/lib/relay-client";
 import { money, shortAddress, type Payment } from "@/lib/model";
 import { Spinner } from "./ui";
+import { PaymentAssetPicker } from "./payment-asset-picker";
+import { checkoutNetworks } from "@/lib/payment-networks";
 
 type Token = {
   symbol: string;
@@ -131,7 +133,6 @@ export function AnyTokenPay({
   const [chainId, setChainId] = useState(8453);
   const [currency, setCurrency] = useState("");
   const [customCurrency, setCustomCurrency] = useState("");
-  const [search, setSearch] = useState("");
   const [route, setRoute] = useState<RouteQuote>();
   const [submittedRequest, setSubmittedRequest] = useState<string>();
   const submittedRef = useRef<string | undefined>(undefined);
@@ -215,17 +216,7 @@ export function AnyTokenPay({
     setRoute(undefined);
   }, [activeWallet?.address]);
   const chain = catalog?.chains.find((value) => value.id === chainId);
-  const tokens = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return (chain?.tokens || [])
-      .filter(
-        (token) =>
-          !query ||
-          token.symbol.toLowerCase().includes(query) ||
-          token.name.toLowerCase().includes(query),
-      )
-      .slice(0, 80);
-  }, [chain, search]);
+  const tokens = chain?.tokens || [];
   const selected =
     chain?.tokens.find(
       (token) => token.address.toLowerCase() === currency.toLowerCase(),
@@ -272,7 +263,10 @@ export function AnyTokenPay({
             ],
           })),
         };
-      } else next = await api<Catalog>("relay/catalog");
+      } else {
+        const live = await api<Catalog>("relay/catalog");
+        next = { chains: checkoutNetworks(live.chains) };
+      }
       const preferred =
         next.chains.find((item) => item.id === 8453) || next.chains[0];
       if (!preferred) throw new Error("No payment networks are available.");
@@ -491,68 +485,59 @@ export function AnyTokenPay({
       </div>
       {!route ? (
         <>
-          <label className="token-field">
-            <span>Network</span>
-            <select
-              value={chainId}
-              onChange={(event) => {
-                const nextId = Number(event.target.value);
-                const next = catalog?.chains.find((item) => item.id === nextId);
-                setChainId(nextId);
-                setCurrency(
-                  next?.tokens.find((token) => token.symbol === "USDC")
-                    ?.address ||
-                    next?.tokens[0]?.address ||
-                    "",
-                );
-                setCustomCurrency("");
-              }}
-            >
-              {catalog?.chains.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="token-search">
-            <Search size={15} />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search token"
-            />
-          </label>
-          <div className="token-grid">
-            {tokens.slice(0, 12).map((token) => (
-              <button
-                key={token.address}
-                className={
-                  currency.toLowerCase() === token.address.toLowerCase() &&
-                  !customCurrency
-                    ? "selected"
-                    : ""
+          <PaymentAssetPicker
+            label="Network"
+            value={String(chainId)}
+            disabled={disabled}
+            options={(catalog?.chains || []).map((item) => ({
+              id: String(item.id),
+              label: item.displayName,
+              icon: item.iconUrl,
+            }))}
+            onChange={(value) => {
+              const nextId = Number(value);
+              const next = catalog?.chains.find((item) => item.id === nextId);
+              setChainId(nextId);
+              setCurrency(
+                next?.tokens.find((token) => token.symbol === "USDC")
+                  ?.address ||
+                  next?.tokens[0]?.address ||
+                  "",
+              );
+              setCustomCurrency("");
+            }}
+          />
+          <PaymentAssetPicker
+            key={chainId}
+            label="Token"
+            value={customCurrency ? "" : currency.toLowerCase()}
+            disabled={disabled}
+            searchable
+            options={tokens.map((token) => ({
+              id: token.address.toLowerCase(),
+              label: token.symbol,
+              subtitle: token.name,
+              icon: token.metadata?.logoURI,
+              symbol: token.symbol,
+            }))}
+            onChange={(value) => {
+              setCurrency(value);
+              setCustomCurrency("");
+            }}
+          />
+          <details className="custom-token-disclosure">
+            <summary>Token not listed?</summary>
+            <label className="token-field custom-token-field">
+              <span>Token contract address</span>
+              <input
+                value={customCurrency}
+                onChange={(event) =>
+                  setCustomCurrency(event.target.value.trim())
                 }
-                onClick={() => {
-                  setCurrency(token.address);
-                  setCustomCurrency("");
-                }}
-              >
-                <span>{token.symbol.slice(0, 1)}</span>
-                <strong>{token.symbol}</strong>
-                {currency.toLowerCase() === token.address.toLowerCase() &&
-                  !customCurrency && <Check size={14} />}
-              </button>
-            ))}
-          </div>
-          <label className="token-field custom-token-field">
-            <span>Token not listed?</span>
-            <input
-              value={customCurrency}
-              onChange={(event) => setCustomCurrency(event.target.value.trim())}
-              placeholder="Paste its contract address"
-            />
-          </label>
+                placeholder="Paste its contract address"
+              />
+            </label>
+          </details>
           <button
             className="button primary wide"
             disabled={disabled || !selected}
