@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   usePrivy,
+  useSignMessage,
   useWallets,
   type ConnectedWallet,
 } from "@privy-io/react-auth";
@@ -46,6 +47,7 @@ import {
   continueArcFunding,
   download,
   errorText,
+  isEmbeddedWallet,
   shareLink,
   signIn,
   startArcCashout,
@@ -135,10 +137,19 @@ export function MerchantApp() {
   const {
     ready: privyReady,
     authenticated,
+    user,
     login,
     logout: privyLogout,
   } = usePrivy();
   const { ready: walletsReady, wallets } = useWallets();
+  const { signMessage } = useSignMessage();
+  const activeWallet =
+    wallets.find(
+      (wallet) =>
+        wallet.address.toLowerCase() === user?.wallet?.address.toLowerCase(),
+    ) ||
+    wallets.find(isEmbeddedWallet) ||
+    wallets[0];
   return (
     <MerchantExperience
       auth={{
@@ -147,7 +158,14 @@ export function MerchantApp() {
         login,
         privyLogout,
         walletsReady,
-        activeWallet: wallets[0],
+        activeWallet,
+        signEmbeddedMessage: async (message, address) => {
+          const { signature } = await signMessage(
+            { message },
+            { address, uiOptions: { showWalletUIs: false } },
+          );
+          return signature;
+        },
       }}
     />
   );
@@ -179,6 +197,7 @@ function MerchantExperience({
     privyLogout: () => Promise<void>;
     walletsReady: boolean;
     activeWallet?: ConnectedWallet;
+    signEmbeddedMessage?: (message: string, address: string) => Promise<string>;
   };
   demoOnly?: boolean;
 }) {
@@ -191,6 +210,9 @@ function MerchantExperience({
     activeWallet,
   } = auth;
   const authAttempt = useRef("");
+  const embeddedSigner = useRef(auth.signEmbeddedMessage);
+  embeddedSigner.current = auth.signEmbeddedMessage;
+  const embeddedAccount = isEmbeddedWallet(activeWallet);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -290,8 +312,18 @@ function MerchantExperience({
           sessionProfile.mode === "demo"
         ) {
           if (!active) return;
-          setStartupMessage("Open your wallet to approve the sign-in message.");
-          await signIn(activeWallet);
+          setStartupMessage(
+            embeddedAccount
+              ? "Preparing your account…"
+              : "Open your wallet to approve the sign-in message.",
+          );
+          await signIn(
+            activeWallet,
+            embeddedSigner.current
+              ? (message) =>
+                  embeddedSigner.current!(message, activeWallet.address)
+              : undefined,
+          );
         }
         if (active) {
           setStartupMessage("Opening your store…");
@@ -315,6 +347,7 @@ function MerchantExperience({
     authenticated,
     walletsReady,
     activeWallet?.address,
+    embeddedAccount,
     load,
   ]);
   useEffect(() => {
@@ -551,7 +584,11 @@ function MerchantExperience({
         </p>
         {slowStartup && (
           <div className="startup-recovery">
-            <p>If no request appears in your wallet, reconnect to try again.</p>
+            <p>
+              {embeddedAccount
+                ? "Your account is taking longer to open. Try signing in again."
+                : "If no request appears in your wallet, reconnect to try again."}
+            </p>
             <button
               className="button secondary"
               onClick={() => location.reload()}
@@ -571,7 +608,7 @@ function MerchantExperience({
                   }
                 }}
               >
-                Reconnect wallet
+                {embeddedAccount ? "Try signing in again" : "Reconnect wallet"}
               </button>
             )}
           </div>

@@ -44,13 +44,30 @@ export async function connect(connectedWallet?: ConnectedWallet) {
   if (!selectedAccount) throw new Error("No wallet selected.");
   return { wallet, account: selectedAccount, provider };
 }
-export async function signIn(connectedWallet: ConnectedWallet) {
-  const { wallet, account } = await connect(connectedWallet);
+export function isEmbeddedWallet(
+  wallet?: Pick<ConnectedWallet, "walletClientType" | "connectorType">,
+) {
+  return (
+    wallet?.connectorType === "embedded" ||
+    wallet?.walletClientType === "privy" ||
+    wallet?.walletClientType === "privy-v2"
+  );
+}
+export async function signIn(
+  connectedWallet: ConnectedWallet,
+  signEmbeddedMessage?: (message: string) => Promise<string>,
+) {
+  const account = connectedWallet.address as Address;
   const { nonce, message } = await api<{ nonce: string; message: string }>(
     "auth/challenge",
     { address: account },
   );
-  const signature = await wallet.signMessage({ account, message });
+  const signature =
+    isEmbeddedWallet(connectedWallet) && signEmbeddedMessage
+      ? await signEmbeddedMessage(message)
+      : await (
+          await connect(connectedWallet)
+        ).wallet.signMessage({ account, message });
   return api<{ profile: import("./model").Profile }>("auth/verify", {
     address: account,
     nonce,
