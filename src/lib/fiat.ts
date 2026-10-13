@@ -8,40 +8,40 @@ import {
   type PaymentMethod,
 } from "./model";
 
-export function paymentForCheckout(
+export async function paymentForCheckout(
   id: string,
   method: PaymentMethod,
   tip: string,
 ) {
-  return store.atomic(() => {
-    const payment = store.getPayment(id);
+  return store.atomic(async () => {
+    const payment = await store.getPayment(id);
     if (!payment) throw new Error("Payment not found.");
     configureCheckout(payment, method, tip);
-    return store.savePayment(payment);
+    return await store.savePayment(payment);
   });
 }
 
-export function saveFiatAttempt(payment: Payment, fiat: FiatPayment) {
-  return store.atomic(() => {
-    const fresh = store.getPayment(payment.id);
+export async function saveFiatAttempt(payment: Payment, fiat: FiatPayment) {
+  return store.atomic(async () => {
+    const fresh = await store.getPayment(payment.id);
     if (!fresh) throw new Error("Payment not found.");
     if (fresh.transfer || fresh.fiat?.status === "paid")
       throw new Error("This sale has already been paid.");
     fresh.fiat = fiat;
     fresh.selectedMethod = fiat.method;
-    return store.savePayment(fresh);
+    return await store.savePayment(fresh);
   });
 }
 
-export function markFiatPaid(
+export async function markFiatPaid(
   id: string,
   provider: FiatPayment["provider"],
   externalId: string,
   method?: FiatPayment["method"],
   totals?: { tax: string; total: string },
 ) {
-  return store.atomic(() => {
-    const payment = store.getPayment(id);
+  return store.atomic(async () => {
+    const payment = await store.getPayment(id);
     if (!payment) throw new Error("Payment not found.");
     if (
       payment.fiat?.externalId &&
@@ -58,7 +58,7 @@ export function markFiatPaid(
       tax: totals?.tax ?? payment.fiat?.tax,
       total: totals?.total ?? payment.fiat?.total,
     };
-    return store.savePayment(payment);
+    return await store.savePayment(payment);
   });
 }
 

@@ -30,7 +30,7 @@ export async function POST(request: Request) {
       )
     )
       throw new Error("PayPal has not confirmed this payment.");
-    const payment = markFiatPaid(
+    const payment = await markFiatPaid(
       input.paymentId,
       "paypal",
       input.orderId,

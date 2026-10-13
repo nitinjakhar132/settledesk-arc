@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       throw new Error("Stripe has not completed the tax calculation yet.");
     const method =
       session.metadata?.settledesk_method === "cashapp" ? "cashapp" : "card";
-    const payment = markFiatPaid(
+    const payment = await markFiatPaid(
       input.paymentId,
       "stripe",
       input.sessionId,

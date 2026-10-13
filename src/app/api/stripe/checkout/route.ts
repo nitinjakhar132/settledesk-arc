@@ -13,7 +13,7 @@ export async function POST(request: Request) {
         tip: z.string().default("0"),
       })
       .parse(await request.json());
-    const payment = paymentForCheckout(
+    const payment = await paymentForCheckout(
       input.paymentId,
       input.method,
       input.tip,
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       success_url: `${origin}/pay/${payment.id}?stripe=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/pay/${payment.id}?stripe=cancelled`,
     });
-    saveFiatAttempt(payment, {
+    await saveFiatAttempt(payment, {
       provider: "stripe",
       method: input.method,
       status: "pending",

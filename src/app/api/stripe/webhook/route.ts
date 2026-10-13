@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       session.metadata?.settledesk_tax !== "automatic" ||
       session.automatic_tax?.status === "complete";
     if (id && session.payment_status === "paid" && taxComplete) {
-      markFiatPaid(
+      await markFiatPaid(
         id,
         "stripe",
         session.id,

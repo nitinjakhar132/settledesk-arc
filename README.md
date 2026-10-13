@@ -100,11 +100,11 @@ To run browser tests on another machine, adjust the `channel` in `playwright.con
 
 ## Storage and hosting
 
-SQLite stores profiles, payments, refund reservations, consumed challenges, and hashed session tokens in `data/settledesk.db`. The store uses WAL and immediate transactions for refund reservations. Data is excluded from source control.
+Production uses shared PostgreSQL storage for profiles, payments, refund reservations, consumed challenges, and hashed session tokens. Set `DATABASE_URL` using a connected database such as the Neon Free integration on Vercel. Transactions use a dedicated connection with serializable isolation and bounded retries.
 
-Deploy this version as **one Node.js service with a persistent disk**, using the included Dockerfile or an equivalent host. It is not suitable for stateless serverless hosting without replacing the storage adapter. Back up the database and its WAL together, or use SQLite’s backup tooling.
+Vercel deployments require `DATABASE_URL`; the app refuses to store production data in temporary SQLite files. Local development defaults to SQLite in `data/settledesk.db`, with WAL and immediate transactions. A standalone Node.js deployment can also use SQLite with a persistent disk. Existing temporary serverless files are not migrated automatically; export records from the old deployment before replacing its storage if they need to be preserved.
 
-Environment variables are documented in `.env.example`. Set the public Privy app ID, set `APP_ORIGIN` to the exact HTTPS public origin behind a proxy, and set `SETTLEDESK_DB` to the persistent volume path. Dedicated RPC URLs can replace public defaults. No Circle API secret or server wallet private key is required for CCTP. `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` enable Coinbase bank cash-out; Stripe and PayPal credentials are optional and only enable their corresponding buyer buttons.
+Environment variables are documented in `.env.example`. Set the public Privy app ID and `APP_ORIGIN` to the exact HTTPS public origin. On Vercel, connect PostgreSQL to the Production environment; for a standalone SQLite service, set `SETTLEDESK_DB` to the persistent volume path. Dedicated RPC URLs can replace public defaults. No Circle API secret or server wallet private key is required for CCTP. `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` enable Coinbase bank cash-out; Stripe and PayPal credentials are optional and only enable their corresponding buyer buttons.
 
 Stripe and PayPal in this prototype are configured as the platform merchant accounts. A production multi-merchant release needs Stripe Connect and PayPal Commerce Platform onboarding so every merchant receives their own fiat proceeds. A processor-confirmed fiat payment is deliberately shown as **settling**: card, Cash App, PayPal, and Venmo proceeds are not magically onchain USDC and are not counted in the merchant’s Arc balance. Fiat disputes and refunds remain in the processor; Rewind is currently for verified USDC payments only.
 
@@ -143,7 +143,9 @@ The installable mobile experience requires HTTPS, except on localhost. Local com
 
 `src/lib/model.ts` — exact amounts and refund rules
 
-`src/lib/store.ts` — persistent SQLite storage and sessions
+`src/lib/store.ts` — persistent records and sessions
+
+`src/lib/database.ts` — shared PostgreSQL storage and local SQLite adapter
 
 `src/app/api/[...path]/route.ts` — authenticated merchant and public checkout API
 

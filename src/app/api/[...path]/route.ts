@@ -49,7 +49,7 @@ function publicPayment(payment: Payment) {
   return result;
 }
 async function session() {
-  return store.sessionOwner((await cookies()).get("sd-session")?.value);
+  return await store.sessionOwner((await cookies()).get("sd-session")?.value);
 }
 function requestOrigin(request: Request) {
   if (process.env.APP_ORIGIN) return new URL(process.env.APP_ORIGIN).origin;
@@ -59,7 +59,7 @@ function requestOrigin(request: Request) {
   return `${protocol}://${request.headers.get("host") || new URL(request.url).host}`;
 }
 async function setSession(owner: string, request: Request) {
-  (await cookies()).set("sd-session", store.newSession(owner), {
+  (await cookies()).set("sd-session", await store.newSession(owner), {
     httpOnly: true,
     secure: requestOrigin(request).startsWith("https:"),
     sameSite: "lax",
@@ -67,8 +67,8 @@ async function setSession(owner: string, request: Request) {
     maxAge: 7 * 86400,
   });
 }
-function requirePayment(id: string) {
-  const p = store.getPayment(id);
+async function requirePayment(id: string) {
+  const p = await store.getPayment(id);
   if (!p) throw new Error("Payment not found.");
   return p;
 }
@@ -76,12 +76,12 @@ function own(p: Payment, owner?: string) {
   if (!owner || p.owner !== owner)
     throw new Error("Sign in as the merchant to manage this payment.");
 }
-function fundingPayment(
+async function fundingPayment(
   owner: string,
   mode: "testnet" | "mainnet",
   amount: string,
-): Payment {
-  const profile = store.profile(owner);
+): Promise<Payment> {
+  const profile = await store.profile(owner);
   if (!profile.address) throw new Error("Connect your wallet first.");
   return {
     id: `fund-${profile.address.toLowerCase()}-${mode}`,
@@ -97,13 +97,13 @@ function fundingPayment(
     refunds: [],
   };
 }
-function cashoutPayment(
+async function cashoutPayment(
   owner: string,
   mode: "testnet" | "mainnet",
   amount: string,
   cashoutId: string,
 ) {
-  const profile = store.profile(owner);
+  const profile = await store.profile(owner);
   if (!profile.address) throw new Error("Connect your wallet first.");
   const value = decimal(units(amount));
   const payment: Payment = {
@@ -146,16 +146,16 @@ async function dispatch(request: Request, parts: string[]) {
   limit(owner || request.headers.get("x-forwarded-for") || "anonymous", 240);
   const body = method === "POST" ? await request.json().catch(() => ({})) : {};
   if (path === "session" && method === "GET")
-    return { profile: owner ? store.profile(owner) : null };
+    return { profile: owner ? await store.profile(owner) : null };
   if (path === "demo" && method === "POST") {
-    const id = store.seedDemo();
+    const id = await store.seedDemo();
     await setSession(id, request);
-    return { profile: store.profile(id) };
+    return { profile: await store.profile(id) };
   }
   if (path === "auth/challenge" && method === "POST") {
     limit(`auth:${request.headers.get("x-forwarded-for") || "local"}`, 15);
     const input = z.object({ address }).parse(body);
-    return store.challenge(requestOrigin(request), input.address);
+    return await store.challenge(requestOrigin(request), input.address);
   }
   if (path === "auth/verify" && method === "POST") {
     const input = z
@@ -165,7 +165,7 @@ async function dispatch(request: Request, parts: string[]) {
         signature: z.string().regex(/^0x[0-9a-f]+$/i),
       })
       .parse(body);
-    const message = store.consumeChallenge(input.nonce);
+    const message = await store.consumeChallenge(input.nonce);
     if (
       !message ||
       !message.startsWith(`${requestOrigin(request)} wants`) ||
@@ -178,10 +178,10 @@ async function dispatch(request: Request, parts: string[]) {
     )
       throw new Error("The sign-in signature is invalid or expired.");
     await setSession(input.address.toLowerCase(), request);
-    return { profile: store.profile(input.address.toLowerCase()) };
+    return { profile: await store.profile(input.address.toLowerCase()) };
   }
   if (path === "logout" && method === "POST") {
-    store.dropSession((await cookies()).get("sd-session")?.value || "");
+    await store.dropSession((await cookies()).get("sd-session")?.value || "");
     (await cookies()).delete("sd-session");
     return { ok: true };
   }
@@ -199,20 +199,26 @@ async function dispatch(request: Request, parts: string[]) {
         "Connect a wallet to switch from demo to a live network.",
       );
     return {
-      profile: store.saveProfile(owner, { ...store.profile(owner), ...input }),
+      profile: await store.saveProfile(owner, {
+        ...(await store.profile(owner)),
+        ...input,
+      }),
     };
   }
   if (path === "payments") {
     if (!owner) throw new Error("Please sign in first.");
-    if (method === "GET")
+    if (method === "GET") {
+      const profile = await store.profile(owner);
+      const payments = (await store.listPayments(owner)).filter(
+        (p) => p.mode === profile.mode,
+      );
       return {
-        payments: store
-          .listPayments(owner)
-          .filter((p) => p.mode === store.profile(owner).mode)
-          .map(store.advanceDemo)
-          .map(publicPayment),
-        profile: store.profile(owner),
+        payments: (await Promise.all(payments.map(store.advanceDemo))).map(
+          publicPayment,
+        ),
+        profile,
       };
+    }
     if (method === "POST") {
       const input = z
         .object({
@@ -226,7 +232,7 @@ async function dispatch(request: Request, parts: string[]) {
         })
         .parse(body);
       const amount = decimal(units(input.amount));
-      const profile = store.profile(owner);
+      const profile = await store.profile(owner);
       const payment: Payment = {
         ...input,
         collectTax: input.collectTax ?? !!profile.collectTax,
@@ -246,7 +252,7 @@ async function dispatch(request: Request, parts: string[]) {
         createdAt: Date.now(),
         refunds: [],
       };
-      return { payment: publicPayment(store.savePayment(payment)) };
+      return { payment: publicPayment(await store.savePayment(payment)) };
     }
   }
   if (path.startsWith("funding/") && method === "POST") {
@@ -259,7 +265,7 @@ async function dispatch(request: Request, parts: string[]) {
         mintHash: txHash.optional(),
       })
       .parse(body);
-    const payment = fundingPayment(owner, input.mode, input.amount);
+    const payment = await fundingPayment(owner, input.mode, input.amount);
     if (path === "funding/quote") {
       limit(`funding-quote:${owner}`, 12);
       return {
@@ -301,7 +307,7 @@ async function dispatch(request: Request, parts: string[]) {
         subdivision: z.string().regex(/^[A-Z]{2}$/),
       })
       .parse(body);
-    const profile = store.profile(owner);
+    const profile = await store.profile(owner);
     if (profile.mode !== "mainnet")
       throw new Error("Bank cash-out is available from Arc mainnet only.");
     if (
@@ -328,10 +334,10 @@ async function dispatch(request: Request, parts: string[]) {
         mintHash: txHash.optional(),
       })
       .parse(body);
-    const profile = store.profile(owner);
+    const profile = await store.profile(owner);
     if (profile.mode !== input.mode)
       throw new Error("The cash-out network does not match your store.");
-    const { payment, refund } = cashoutPayment(
+    const { payment, refund } = await cashoutPayment(
       owner,
       input.mode,
       input.amount,
@@ -364,7 +370,7 @@ async function dispatch(request: Request, parts: string[]) {
   }
   if (parts[0] !== "payments" || !parts[1])
     return Response.json({ error: "Not found" }, { status: 404 });
-  const payment = store.advanceDemo(requirePayment(parts[1]));
+  const payment = await store.advanceDemo(await requirePayment(parts[1]));
   const action = parts[2];
   if (parts.length === 2 && method === "GET")
     return { payment: publicPayment(payment) };
@@ -381,7 +387,7 @@ async function dispatch(request: Request, parts: string[]) {
         "Only a confirmed payment without a refund can be fulfilled.",
       );
     payment.fulfilledAt ||= Date.now();
-    return { payment: publicPayment(store.savePayment(payment)) };
+    return { payment: publicPayment(await store.savePayment(payment)) };
   }
   if (action === "refund") {
     own(payment, owner);
@@ -392,8 +398,8 @@ async function dispatch(request: Request, parts: string[]) {
         idempotencyKey: z.string().uuid(),
       })
       .parse(body);
-    return store.atomic(() => {
-      const fresh = requirePayment(payment.id);
+    return store.atomic(async () => {
+      const fresh = await requirePayment(payment.id);
       const existing = fresh.refunds.find((r) => r.id === input.idempotencyKey);
       if (existing) return { payment: publicPayment(fresh), refund: existing };
       validateRefund(fresh, input.amount);
@@ -406,7 +412,7 @@ async function dispatch(request: Request, parts: string[]) {
         reserved: fresh.mode !== "demo",
       };
       fresh.refunds.push(refund);
-      store.savePayment(fresh);
+      await store.savePayment(fresh);
       return { payment: publicPayment(fresh), refund };
     });
   }
@@ -424,10 +430,10 @@ async function dispatch(request: Request, parts: string[]) {
         tip: z.string().default("0"),
       })
       .parse(body);
-    return store.atomic(() => {
-      const fresh = requirePayment(payment.id);
+    return store.atomic(async () => {
+      const fresh = await requirePayment(payment.id);
       configureCheckout(fresh, input.method as PaymentMethod, input.tip);
-      return { payment: publicPayment(store.savePayment(fresh)) };
+      return { payment: publicPayment(await store.savePayment(fresh)) };
     });
   }
   const refundId =
@@ -448,8 +454,8 @@ async function dispatch(request: Request, parts: string[]) {
         tip: z.string().default("0"),
       })
       .parse(body);
-    return store.atomic(() => {
-      const fresh = requirePayment(payment.id);
+    return store.atomic(async () => {
+      const fresh = await requirePayment(payment.id);
       if (fresh.transfer || fresh.fiat?.status === "paid")
         return { payment: publicPayment(fresh) };
       configureCheckout(fresh, input.method, input.tip);
@@ -475,7 +481,7 @@ async function dispatch(request: Request, parts: string[]) {
           total: fresh.amount,
         };
       }
-      return { payment: publicPayment(store.savePayment(fresh)) };
+      return { payment: publicPayment(await store.savePayment(fresh)) };
     });
   }
   if (action === "demo-receive") {
@@ -485,7 +491,7 @@ async function dispatch(request: Request, parts: string[]) {
     if (transfer && transfer.status === "ready") {
       transfer.manual = false;
       transfer.startedAt = Date.now() - 4600;
-      store.savePayment(payment);
+      await store.savePayment(payment);
     }
     return { payment: publicPayment(payment) };
   }
@@ -502,7 +508,7 @@ async function dispatch(request: Request, parts: string[]) {
       })
       .parse(body);
     const relayQuote = await createRelayQuote(payment, input);
-    store.savePayment(payment);
+    await store.savePayment(payment);
     return { quote: relayQuote, payment: publicPayment(payment) };
   }
   if (action === "relay-confirm") {
@@ -511,17 +517,17 @@ async function dispatch(request: Request, parts: string[]) {
       .object({ requestId: z.string().min(1).max(100) })
       .parse(body);
     const proof = await verifyRelayPayment(payment, input.requestId);
-    return store.atomic(() => {
-      const fresh = requirePayment(payment.id);
+    return store.atomic(async () => {
+      const fresh = await requirePayment(payment.id);
       if (fresh.transfer?.status === "settled")
         return { payment: publicPayment(fresh) };
-      store.bindBurn(
+      await store.bindBurn(
         fresh.mode,
         `relay:${proof.pending.originChainId}`,
         proof.inputHash,
         fresh.id,
       );
-      store.bindBurn(fresh.mode, "arc", proof.destinationHash, fresh.id);
+      await store.bindBurn(fresh.mode, "arc", proof.destinationHash, fresh.id);
       fresh.transfer = {
         status: "settled",
         startedAt: proof.pending.quotedAt,
@@ -536,7 +542,7 @@ async function dispatch(request: Request, parts: string[]) {
       };
       fresh.payerAddress = proof.payer;
       fresh.pendingRelay = undefined;
-      return { payment: publicPayment(store.savePayment(fresh)) };
+      return { payment: publicPayment(await store.savePayment(fresh)) };
     });
   }
   if (action === "quote") {
@@ -559,8 +565,8 @@ async function dispatch(request: Request, parts: string[]) {
       refund,
       input.originChainId,
     );
-    return store.atomic(() => {
-      const fresh = requirePayment(payment.id);
+    return store.atomic(async () => {
+      const fresh = await requirePayment(payment.id);
       const target = refundId
         ? fresh.refunds.find((r) => r.id === refundId)
         : fresh.transfer;
@@ -572,7 +578,7 @@ async function dispatch(request: Request, parts: string[]) {
           "A transfer is already linked. Track it instead of paying again.",
         );
       if (target?.burnHash) return { payment: publicPayment(fresh) };
-      store.bindBurn(
+      await store.bindBurn(
         payment.mode,
         refund ? "arc" : `cctp:${input.originChainId || "base"}`,
         input.hash,
@@ -593,7 +599,7 @@ async function dispatch(request: Request, parts: string[]) {
         fresh.transfer = update;
         fresh.payerAddress = result.payer;
       }
-      return { payment: publicPayment(store.savePayment(fresh)) };
+      return { payment: publicPayment(await store.savePayment(fresh)) };
     });
   }
   if (action === "refresh") {
@@ -604,8 +610,8 @@ async function dispatch(request: Request, parts: string[]) {
     const nextRefunds = await Promise.all(
       payment.refunds.map((r) => refreshTransfer(payment, r, r)),
     );
-    return store.atomic(() => {
-      const fresh = requirePayment(payment.id);
+    return store.atomic(async () => {
+      const fresh = await requirePayment(payment.id);
       if (nextTransfer && fresh.transfer?.status !== "settled")
         fresh.transfer = {
           ...nextTransfer,
@@ -622,7 +628,7 @@ async function dispatch(request: Request, parts: string[]) {
               mintHash: r.mintHash,
             },
       );
-      return { payment: publicPayment(store.savePayment(fresh)) };
+      return { payment: publicPayment(await store.savePayment(fresh)) };
     });
   }
   if (action === "mint") {
@@ -630,14 +636,14 @@ async function dispatch(request: Request, parts: string[]) {
     const transfer = refund || payment.transfer;
     if (!transfer) throw new Error("No transfer to complete.");
     await verifyMint(payment, transfer, input.hash as Hex, refund);
-    return store.atomic(() => {
-      const fresh = requirePayment(payment.id);
+    return store.atomic(async () => {
+      const fresh = await requirePayment(payment.id);
       const target = refundId
         ? fresh.refunds.find((r) => r.id === refundId)
         : fresh.transfer;
       if (!target) throw new Error("Transfer not found.");
       target.mintHash = input.hash;
-      return { payment: publicPayment(store.savePayment(fresh)) };
+      return { payment: publicPayment(await store.savePayment(fresh)) };
     });
   }
   if (action === "reattest") {

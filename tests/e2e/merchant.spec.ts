@@ -43,7 +43,7 @@ test("API rejects cross-merchant actions, over-refunds, and unconfirmed fulfillm
     ).status(),
   ).toBe(400);
   const other = await playwright.request.newContext({
-    baseURL: "http://localhost:3000",
+    baseURL: process.env.TEST_BASE_URL || "http://localhost:3000",
   });
   await other.post("/api/demo", { data: {} });
   expect(
