@@ -2,7 +2,7 @@
 
 import { PrivyProvider } from "@privy-io/react-auth";
 import { usePathname } from "next/navigation";
-import { arbitrum, base, baseSepolia } from "viem/chains";
+import { arbitrum, base, baseSepolia, mainnet } from "viem/chains";
 import { arc, arcTestnet } from "@/lib/chains";
 
 export function AppProviders({
@@ -31,7 +31,7 @@ export function AppProviders({
           showWalletLoginFirst: false,
           walletChainType: "ethereum-only",
           walletList: [
-            "detected_wallets",
+            "detected_ethereum_wallets",
             "metamask",
             "coinbase_wallet",
             "wallet_connect",
@@ -43,11 +43,11 @@ export function AppProviders({
           },
           showWalletUIs: true,
         },
-        // Production workspaces settle on Arc mainnet. Testnet remains
-        // available as an explicit store setting, but must not be the wallet
-        // default for newly created email/SMS users.
-        supportedChains: [arc, base, arbitrum, arcTestnet, baseSepolia],
-        defaultChain: arc,
+        // Arc first keeps embedded wallets on Arc. Do not set defaultChain:
+        // Privy would require Arc in WalletConnect sessions, blocking mobile
+        // wallets that can sign in on Ethereum but have not added Arc.
+        // Payment flows explicitly switch to their transaction network.
+        supportedChains: [arc, mainnet, base, arbitrum, arcTestnet, baseSepolia],
       }}
     >
       {children}
