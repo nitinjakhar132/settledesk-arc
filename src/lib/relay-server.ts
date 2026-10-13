@@ -7,7 +7,7 @@ import {
   type Address,
   type Hex,
 } from "viem";
-import { network } from "./chains";
+import { network, receiptRpcUrl } from "./chains";
 import { isCctpUsdc } from "./cctp-chains";
 import { units, type Payment } from "./model";
 
@@ -151,8 +151,6 @@ export async function verifyRelayPayment(payment: Payment, requestId: string) {
   const pending = payment.pendingRelay;
   if (!pending || pending.requestId !== requestId)
     throw new Error("This Relay quote does not belong to the sale.");
-  if (Date.now() - pending.quotedAt > 30 * 60_000)
-    throw new Error("This Relay quote expired. Request a fresh route.");
   const status = (await relayFetch(
     `/intents/status/v3?requestId=${encodeURIComponent(requestId)}`,
   )) as {
@@ -162,6 +160,13 @@ export async function verifyRelayPayment(payment: Payment, requestId: string) {
     originChainId?: number;
     destinationChainId?: number;
   };
+  if (
+    status.status !== "success" &&
+    Date.now() - pending.quotedAt > 30 * 60_000
+  )
+    throw new Error(
+      "This Relay quote expired before settlement. Check the submitted transaction before requesting another route.",
+    );
   if (status.status !== "success")
     throw new Error("Relay is still settling this payment. Refresh shortly.");
   if (
@@ -212,7 +217,7 @@ export async function verifyRelayPayment(payment: Payment, requestId: string) {
   if (!origin?.httpRpcUrl)
     throw new Error("Relay’s source-chain proof is unavailable.");
   const originReceipt = await createPublicClient({
-    transport: http(origin.httpRpcUrl),
+    transport: http(receiptRpcUrl(origin.id, origin.httpRpcUrl)),
   }).getTransactionReceipt({ hash: inputHash });
   if (originReceipt.status !== "success")
     throw new Error("Relay’s source transaction did not succeed.");

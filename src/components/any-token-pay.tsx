@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectedWallet } from "@privy-io/react-auth";
 import { ArrowLeft, ArrowRight, Check, Coins, Search, X } from "lucide-react";
 import { isAddress } from "viem";
@@ -111,6 +111,7 @@ export function AnyTokenPay({
   onBusy,
   onPaid,
   onError,
+  recoveryOnly = false,
 }: {
   payment: Payment;
   tip: string;
@@ -123,6 +124,7 @@ export function AnyTokenPay({
   onBusy: (message: string) => void;
   onPaid: (payment: Payment) => void;
   onError: (message: string) => void;
+  recoveryOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [catalog, setCatalog] = useState<Catalog>();
@@ -131,6 +133,84 @@ export function AnyTokenPay({
   const [customCurrency, setCustomCurrency] = useState("");
   const [search, setSearch] = useState("");
   const [route, setRoute] = useState<RouteQuote>();
+  const [submittedRequest, setSubmittedRequest] = useState<string>();
+  const submittedRef = useRef<string | undefined>(undefined);
+  function markSubmitted(requestId: string, hash = "submitted") {
+    submittedRef.current = requestId;
+    setSubmittedRequest(requestId);
+    try {
+      localStorage.setItem(`settledesk:relay:${payment.id}:${requestId}`, hash);
+    } catch {}
+  }
+  async function checkRelayPayment(requestId: string) {
+    const relayStatus = await api<{ status?: string; inTxHashes?: string[] }>(
+      `relay/intents/status/v3?requestId=${encodeURIComponent(requestId)}`,
+    );
+    if (relayStatus.status === "success") {
+      markSubmitted(requestId);
+      const result = await api<{ payment: Payment }>(
+        `payments/${payment.id}/relay-confirm`,
+        { requestId },
+      );
+      onPaid(result.payment);
+      return "settled";
+    }
+    if (relayStatus.inTxHashes?.length || submittedRef.current === requestId) {
+      markSubmitted(requestId);
+      return "submitted";
+    }
+    return "waiting";
+  }
+  async function recoverPayment() {
+    const requestId = submittedRef.current || payment.pendingRelay?.requestId;
+    if (!requestId) return;
+    onBusy("Checking your submitted payment—no new payment will be sent…");
+    onError("");
+    try {
+      const result = await checkRelayPayment(requestId);
+      if (result === "settled") setOpen(false);
+      else
+        onError(
+          "The payment is still being verified. Check again shortly; do not pay again.",
+        );
+    } catch {
+      onError(
+        "We could not verify settlement yet. Check payment status again shortly; do not pay again.",
+      );
+    } finally {
+      onBusy("");
+    }
+  }
+  useEffect(() => {
+    const requestId = payment.pendingRelay?.requestId;
+    if (!requestId) return;
+    let active = true;
+    try {
+      if (localStorage.getItem(`settledesk:relay:${payment.id}:${requestId}`))
+        markSubmitted(requestId);
+    } catch {}
+    api<{ status?: string; inTxHashes?: string[] }>(
+      `relay/intents/status/v3?requestId=${encodeURIComponent(requestId)}`,
+    )
+      .then(async (status) => {
+        if (!active) return;
+        if (status.inTxHashes?.length || status.status === "success")
+          markSubmitted(requestId);
+        if (status.status === "success") {
+          const result = await api<{ payment: Payment }>(
+            `payments/${payment.id}/relay-confirm`,
+            { requestId },
+          );
+          if (active) onPaid(result.payment);
+        }
+      })
+      .catch(() => {
+        /* Recovery remains available without re-submitting. */
+      });
+    return () => {
+      active = false;
+    };
+  }, [payment.id, payment.pendingRelay?.requestId, onPaid]);
   useEffect(() => {
     setRoute(undefined);
   }, [activeWallet?.address]);
@@ -289,8 +369,25 @@ export function AnyTokenPay({
         );
         onPaid(result.payment);
       } else {
+        const existing = await checkRelayPayment(route.quote.requestId);
+        if (existing === "settled") {
+          setOpen(false);
+          return;
+        }
+        if (existing === "submitted") {
+          onError(
+            "Payment already submitted. Check payment status; do not pay again.",
+          );
+          return;
+        }
         onBusy("Confirm the Relay payment in your wallet…");
-        await executeRelayPayment(route.quote, chainId, activeWallet, onBusy);
+        await executeRelayPayment(
+          route.quote,
+          chainId,
+          activeWallet,
+          onBusy,
+          (hash) => markSubmitted(route.quote.requestId, hash),
+        );
         onBusy("Verifying USDC arrival on Arc…");
         const result = await api<{ payment: Payment }>(
           `payments/${payment.id}/relay-confirm`,
@@ -300,12 +397,44 @@ export function AnyTokenPay({
       }
       setOpen(false);
     } catch (error) {
+      if (route.kind === "relay") {
+        try {
+          const result = await checkRelayPayment(route.quote.requestId);
+          if (result === "settled") {
+            setOpen(false);
+            return;
+          }
+          if (result === "submitted") {
+            onError(
+              "Your payment was submitted. The receipt check is delayed—check payment status instead of paying again.",
+            );
+            return;
+          }
+        } catch {
+          if (submittedRef.current) {
+            onError(
+              "Your payment was submitted. Check payment status again shortly; do not pay again.",
+            );
+            return;
+          }
+        }
+      }
       onError(errorText(error));
     } finally {
       onBusy("");
     }
   }
 
+  if (recoveryOnly || (!open && submittedRequest))
+    return (
+      <button
+        className="button secondary wide"
+        disabled={disabled}
+        onClick={recoverPayment}
+      >
+        {disabled ? <Spinner /> : <Check size={18} />} Check payment status
+      </button>
+    );
   if (!open)
     return (
       <button
@@ -343,7 +472,7 @@ export function AnyTokenPay({
           {connectWallet && (
             <button
               className="button secondary"
-              disabled={disabled}
+              disabled={disabled || !!submittedRequest}
               onClick={connectWallet}
             >
               {activeWallet ? "Use another wallet" : "Connect wallet"}
@@ -477,13 +606,14 @@ export function AnyTokenPay({
           <button
             className="button primary wide"
             disabled={disabled}
-            onClick={confirm}
+            onClick={submittedRequest ? recoverPayment : confirm}
           >
             {disabled ? <Spinner /> : <Coins size={18} />}
-            Confirm in wallet
+            {submittedRequest ? "Check payment status" : "Confirm in wallet"}
           </button>
           <button
             className="text-button wide"
+            disabled={disabled || !!submittedRequest}
             onClick={() => setRoute(undefined)}
           >
             Choose another token

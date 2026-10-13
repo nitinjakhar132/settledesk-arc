@@ -5,7 +5,19 @@ import { arbitrum } from "viem/chains";
 import { createServer } from "node:http";
 import type { Execute } from "@relayprotocol/relay-sdk";
 import { errorText } from "../src/lib/client";
+import { receiptRpcUrl } from "../src/lib/chains";
 import { assertRelayFunds, walletOnRelayChain } from "../src/lib/relay-client";
+
+test("Arbitrum receipt verification uses its official historical RPC", () => {
+  assert.equal(
+    receiptRpcUrl(42161, "https://arbitrum-one.publicnode.com"),
+    "https://arb1.arbitrum.io/rpc",
+  );
+  assert.equal(
+    receiptRpcUrl(8453, "https://mainnet.base.org"),
+    "https://mainnet.base.org",
+  );
+});
 
 test("Relay switches the Privy wallet to the quoted source chain", async () => {
   let currentChain = 5042;

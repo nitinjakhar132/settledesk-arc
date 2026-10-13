@@ -47,7 +47,7 @@ const MAINNET_CCTP_CHAINS: CctpChain[] = [
     name: "Arbitrum",
     symbol: "ETH",
     usdc: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-    rpc: "https://arbitrum-one.publicnode.com",
+    rpc: "https://arb1.arbitrum.io/rpc",
     explorer: "https://arbiscan.io",
   },
   {

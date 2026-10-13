@@ -3,6 +3,7 @@
 import {
   createClient,
   getClient,
+  adaptViemWallet,
   type Execute,
 } from "@relayprotocol/relay-sdk";
 import { configureDynamicChains } from "@relayprotocol/relay-sdk/chain-utils";
@@ -17,6 +18,7 @@ import {
   type Chain,
 } from "viem";
 import type { ConnectedWallet } from "@privy-io/react-auth";
+import { receiptRpcUrl } from "./chains";
 
 let relayReady: Promise<void> | undefined;
 
@@ -30,6 +32,23 @@ async function prepareRelay() {
         confirmationPollingInterval: 1_500,
       });
       await configureDynamicChains();
+      getClient().configure({
+        chains: getClient().chains.map((chain) => {
+          const rpc = receiptRpcUrl(chain.id, chain.httpRpcUrl || "");
+          return !rpc || rpc === chain.httpRpcUrl
+            ? chain
+            : {
+                ...chain,
+                httpRpcUrl: rpc,
+                viemChain: chain.viemChain
+                  ? {
+                      ...chain.viemChain,
+                      rpcUrls: { default: { http: [rpc] } },
+                    }
+                  : undefined,
+              };
+        }),
+      });
     })().catch((error) => {
       relayReady = undefined;
       throw error;
@@ -43,6 +62,7 @@ export async function executeRelayPayment(
   originChainId: number,
   connectedWallet: ConnectedWallet,
   onStep: (step: string) => void,
+  onSubmitted?: (hash: string) => void,
 ) {
   onStep("Preparing the payment network…");
   await preparationTimeout(
@@ -67,9 +87,16 @@ export async function executeRelayPayment(
     `Your wallet did not finish switching to ${source.displayName}. Open your wallet, select that network, then try again. No payment was submitted.`,
   );
   onStep("Confirm the Relay payment in your wallet…");
+  const adapted = adaptViemWallet(wallet);
+  const sendTransaction = adapted.handleSendTransactionStep;
+  adapted.handleSendTransactionStep = async (chainId, item, step) => {
+    const hash = await sendTransaction(chainId, item, step);
+    if (hash && step.id === "deposit") onSubmitted?.(hash);
+    return hash;
+  };
   return getClient().actions.execute({
     quote,
-    wallet,
+    wallet: adapted,
     disableCapabilitiesCheck: true,
     onProgress: ({ currentStep, currentStepItem }) => {
       const label =

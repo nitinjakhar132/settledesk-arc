@@ -399,6 +399,19 @@ function CheckoutExperience({
             </span>
             <h1>This QR has expired.</h1>
             <p>Ask the merchant to make a fresh quick sale.</p>
+            {p.pendingRelay && (
+              <AnyTokenPay
+                payment={p}
+                tip={tip}
+                authenticated={authenticated}
+                login={login}
+                disabled={!!busy}
+                onBusy={setBusy}
+                onPaid={setPayment}
+                onError={setError}
+                recoveryOnly
+              />
+            )}
           </div>
         ) : (
           <>

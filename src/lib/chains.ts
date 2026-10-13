@@ -20,6 +20,10 @@ export const arcTestnet = defineChain({
   },
   testnet: true,
 });
+export function receiptRpcUrl(chainId: number, defaultRpc: string) {
+  // PublicNode can reject valid historical receipts without an archive token.
+  return chainId === 42161 ? "https://arb1.arbitrum.io/rpc" : defaultRpc;
+}
 export function network(mode: Mode, side: "base" | "arc") {
   const main = mode === "mainnet";
   return {
