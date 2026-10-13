@@ -7,6 +7,7 @@ import {
   refundable,
   validateRefund,
   statusOf,
+  isReceivedPayment,
   feeFromBasisPoints,
   configureCheckout,
   paidTotalOf,
@@ -16,6 +17,73 @@ import {
 import { referenceHook, validateMessage } from "../src/lib/cctp";
 import { network } from "../src/lib/chains";
 import { cctpChain, isCctpUsdc } from "../src/lib/cctp-chains";
+import { paymentRoute } from "../src/lib/payment-presentation";
+
+test("history excludes unpaid and unfinished links but preserves refunded receipts", () => {
+  const paid = payment();
+  paid.expiresAt = Date.now() - 1000;
+  assert.equal(statusOf(paid), "settled");
+  assert.equal(isReceivedPayment(paid), true);
+  assert.equal(isReceivedPayment({ ...paid, transfer: undefined }), false);
+  assert.equal(
+    isReceivedPayment({
+      ...paid,
+      transfer: { status: "processing", startedAt: Date.now() },
+    }),
+    false,
+  );
+  assert.equal(
+    isReceivedPayment({
+      ...paid,
+      refunds: [
+        {
+          id: "refund",
+          amount: "100",
+          reason: "Return",
+          status: "settled",
+          startedAt: Date.now(),
+        },
+      ],
+    }),
+    true,
+  );
+});
+
+test("Relay receipt uses the actual chain and never implies Circle CCTP", () => {
+  const paid = {
+    ...payment(),
+    mode: "mainnet" as const,
+    transfer: {
+      status: "settled" as const,
+      startedAt: Date.now(),
+      rail: "relay" as const,
+      originChainId: 42161,
+      originSymbol: "ETH",
+    },
+  };
+  assert.equal(paymentRoute(paid).origin, "Arbitrum");
+  assert.equal(paymentRoute(paid).rail, "relay");
+  assert.equal(paymentRoute(paid).symbol, "ETH");
+  assert.equal(paymentRoute(paid).sourceExplorer, "https://arbiscan.io");
+  assert.equal(
+    paymentRoute({
+      ...paid,
+      transfer: { ...paid.transfer, originChainId: 999999 },
+    }).origin,
+    "Chain 999999",
+  );
+  const cctp = paymentRoute({
+    ...paid,
+    transfer: {
+      ...paid.transfer,
+      rail: "cctp",
+      originChainId: 8453,
+      originSymbol: undefined,
+    },
+  });
+  assert.equal(cctp.origin, "Base");
+  assert.equal(cctp.symbol, "USDC");
+});
 
 function payment(): Payment {
   return {

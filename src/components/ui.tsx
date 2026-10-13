@@ -23,6 +23,7 @@ import {
   type Refund,
 } from "@/lib/model";
 import { explorer } from "@/lib/chains";
+import { paymentRoute } from "@/lib/payment-presentation";
 
 export function Logo({ compact = false }: { compact?: boolean }) {
   return (
@@ -151,9 +152,11 @@ export function PaymentRow({
 }) {
   const status = statusOf(payment);
   const statusText =
-    payment.fiat?.status === "paid"
+    payment.fiat?.status === "paid" && payment.transfer?.status !== "settled"
       ? "Customer paid · payout settling"
-      : statusLabels[status];
+      : status === "settled" && !payment.fiat
+        ? "USDC received"
+        : statusLabels[status];
   const total = paidTotalOf(payment);
   return (
     <button
@@ -228,6 +231,7 @@ export function Journey({
   refund?: Refund;
 }) {
   const transfer = refund || payment.transfer;
+  const route = paymentRoute(payment, refund);
   const stage =
     !transfer || refund?.reserved
       ? -1
@@ -238,13 +242,23 @@ export function Journey({
           : 1;
   const items = [
     {
-      title: refund ? "Refund sent from Arc" : "Payment sent from Base",
-      description: "USDC begins its journey",
+      title: refund
+        ? "Refund sent from Arc"
+        : `Payment sent from ${route.origin}`,
+      description: `${route.symbol} payment submitted`,
       Icon: ArrowUpRight,
     },
     {
-      title: "Verified by Circle",
-      description: "Transfer checked and attested",
+      title:
+        route.rail === "cctp"
+          ? "Verified by Circle"
+          : route.rail === "relay"
+            ? "Delivered by Relay"
+            : "Payment verified",
+      description:
+        route.rail === "cctp"
+          ? "USDC transfer checked and attested"
+          : "USDC settlement verified on Arc",
       Icon: ShieldCheck,
     },
     {
@@ -289,16 +303,35 @@ export function Proof({
   refund?: Refund;
 }) {
   const transfer = refund || payment.transfer;
+  const route = paymentRoute(payment, refund);
+  const sourceHash = transfer?.inTxHash || transfer?.burnHash;
   return (
     <details className="proof">
       <summary>
         <ShieldCheck size={15} />
         {payment.mode === "demo"
           ? "Demo transfer details"
-          : "View settlement proof"}
+          : "Transaction details"}
         <ChevronRight size={15} />
       </summary>
       <div>
+        <p>
+          <span>Route</span>
+          <strong>
+            {route.origin} → {route.destination}
+          </strong>
+        </p>
+        <p>
+          <span>Payment method</span>
+          <strong>
+            {route.rail === "cctp"
+              ? "USDC · Circle CCTP"
+              : route.rail === "relay"
+                ? `${route.symbol} · Relay`
+                : "Crypto payment"}
+          </strong>
+        </p>
+        <Journey payment={payment} refund={refund} />
         <p>
           <span>Reference</span>
           <strong>{payment.reference}</strong>
@@ -319,13 +352,9 @@ export function Proof({
             )}
           </strong>
         </p>
-        {transfer?.burnHash && (
+        {sourceHash && route.sourceExplorer && (
           <a
-            href={explorer(
-              payment.mode,
-              refund ? "arc" : "base",
-              transfer.burnHash,
-            )}
+            href={`${route.sourceExplorer}/tx/${sourceHash}`}
             target="_blank"
             rel="noreferrer"
           >
@@ -345,13 +374,13 @@ export function Proof({
             Destination transaction <ExternalLink size={13} />
           </a>
         )}
-        {transfer?.nonce && (
+        {route.rail === "cctp" && transfer?.nonce && (
           <p>
             <span>Circle message</span>
             <code title={transfer.nonce}>{shortAddress(transfer.nonce)}</code>
           </p>
         )}
-        {transfer?.fee !== undefined && (
+        {route.rail === "cctp" && transfer?.fee !== undefined && (
           <p>
             <span>CCTP fee</span>
             <strong>{money(transfer.fee, true)} USDC</strong>
@@ -359,8 +388,9 @@ export function Proof({
         )}
         {payment.mode !== "demo" && transfer?.status === "settled" && (
           <small>
-            Verified against Circle’s destination contract at finalized block
-            state.
+            {route.rail === "cctp"
+              ? "Verified against Circle’s destination contract at finalized block state."
+              : "Source payment and USDC delivery verified against on-chain transaction receipts."}
           </small>
         )}
       </div>

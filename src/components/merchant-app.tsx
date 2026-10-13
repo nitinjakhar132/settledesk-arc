@@ -62,6 +62,7 @@ import {
   refundedUnits,
   shortAddress,
   statusOf,
+  isReceivedPayment,
   units,
   decimal,
   type Payment,
@@ -477,17 +478,19 @@ function MerchantExperience({
     (sum, p) => sum + units(p.amount) - refundedUnits(p, false),
     0n,
   );
-  const pending = payments.filter((p) =>
-    ["processing", "ready", "expired"].includes(statusOf(p)),
+  const pending = payments.filter(
+    (p) =>
+      !!p.transfer && ["processing", "ready", "expired"].includes(statusOf(p)),
   );
   const attention = payments.filter(
     (p) =>
-      ["ready", "expired"].includes(statusOf(p)) ||
+      (!!p.transfer && ["ready", "expired"].includes(statusOf(p))) ||
       p.refunds.some(
         (r) => ["ready", "expired"].includes(r.status) || r.reserved,
       ),
   );
-  const filtered = payments
+  const history = payments.filter(isReceivedPayment);
+  const filtered = history
     .filter((p) =>
       `${p.customer} ${p.description} ${p.reference}`
         .toLowerCase()
@@ -498,10 +501,6 @@ function MerchantExperience({
         filter === "All" ||
         (filter === "Received" &&
           ["settled", "partial"].includes(statusOf(p))) ||
-        (filter === "Pending" &&
-          ["requested", "processing", "ready", "expired"].includes(
-            statusOf(p),
-          )) ||
         (filter === "Refunds" && p.refunds.length > 0),
     );
   const events = useMemo(
@@ -1000,7 +999,7 @@ function MerchantExperience({
                       <section className="payments-panel">
                         <div className="section-heading">
                           <h2>
-                            Recent payments<span>{payments.length}</span>
+                            Recent payments<span>{history.length}</span>
                           </h2>
                           <button
                             className="text-button"
@@ -1010,9 +1009,9 @@ function MerchantExperience({
                             <ArrowUpRight size={14} />
                           </button>
                         </div>
-                        {payments.length ? (
+                        {history.length ? (
                           <div className="payment-list">
-                            {payments.slice(0, 5).map((p) => (
+                            {history.slice(0, 5).map((p) => (
                               <PaymentRow
                                 key={p.id}
                                 payment={p}
@@ -1144,7 +1143,7 @@ function MerchantExperience({
                     </button>
                   </div>
                   <div className="filter-tabs">
-                    {["All", "Received", "Pending", "Refunds"].map((f) => (
+                    {["All", "Received", "Refunds"].map((f) => (
                       <button
                         key={f}
                         className={filter === f ? "active" : ""}

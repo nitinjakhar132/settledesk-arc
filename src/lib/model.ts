@@ -104,7 +104,9 @@ export function refundable(payment: Payment): string {
   return decimal(units(payment.amount) - refundedUnits(payment));
 }
 export function statusOf(payment: Payment): PaymentStatus {
-  if (payment.fiat?.status === "paid") return "processing";
+  if (!payment.transfer && payment.fiat?.status === "refunded")
+    return "refunded";
+  if (!payment.transfer && payment.fiat?.status === "paid") return "processing";
   if (payment.expiresAt && payment.expiresAt <= Date.now() && !payment.transfer)
     return "expired";
   if (!payment.transfer) return "requested";
@@ -113,6 +115,16 @@ export function statusOf(payment: Payment): PaymentStatus {
   const refunded = refundedUnits(payment);
   if (refunded >= units(payment.amount)) return "refunded";
   return refunded > 0n ? "partial" : "settled";
+}
+
+// A created link or a bridge in progress is not a received payment.
+// Keep refunded receipts in history: they were genuinely paid originally.
+export function isReceivedPayment(payment: Payment): boolean {
+  return (
+    payment.transfer?.status === "settled" ||
+    payment.fiat?.status === "paid" ||
+    payment.fiat?.status === "refunded"
+  );
 }
 
 export function subtotalOf(payment: Payment): string {

@@ -350,11 +350,12 @@ export function PaymentDetail({
                 </div>
               )}
             </>
+          ) : payment.transfer?.status === "settled" ? (
+            <p className="center-note green">
+              {money(payment.amount)} USDC received in your wallet
+            </p>
           ) : (
-            <>
-              <RouteLine mode={payment.mode} />
-              <Journey payment={payment} />
-            </>
+            <Journey payment={payment} />
           )}
           {payment.transfer?.status === "ready" && (
             <button
@@ -534,7 +535,7 @@ export function PaymentDetail({
                           ? "DEMO — NOT PROOF OF PAYMENT"
                           : payment.fiat
                             ? `${payment.fiat.provider} payment receipt`
-                            : "SettleDesk CCTP receipt",
+                            : "SettleDesk USDC payment receipt",
                     },
                     null,
                     2,
